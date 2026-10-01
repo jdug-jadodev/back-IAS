@@ -134,7 +134,7 @@ class ApprovalRulesTest {
     }
 
     private ApplicationData application(String amount, int termMonths) {
-        return new ApplicationData("REF-001", "CLI-1001", new BigDecimal(amount), termMonths);
+        return new ApplicationData("REF-001", null, "CLI-1001", new BigDecimal(amount), termMonths);
     }
 
     private Customer customer(CustomerStatus status, String creditLimit) {

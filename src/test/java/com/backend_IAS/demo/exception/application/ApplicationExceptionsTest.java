@@ -29,9 +29,9 @@ class ApplicationExceptionsTest {
     @ParameterizedTest
     @ValueSource(strings = {"REF-001", " REF-002 ", "REF-%s-%n-003"})
     void shouldIncludeConflictingReferenceWithoutInterpretingFormatCharacters(String reference) {
-        ReferenceConflictException exception = new ReferenceConflictException(reference);
+        IdempotencyConflictException exception = new IdempotencyConflictException(reference);
 
-        assertEquals("La referencia " + reference + " ya está asociada a una solicitud con datos diferentes",
+        assertEquals("La clave de idempotencia " + reference + " ya está asociada a una solicitud con datos diferentes",
                 exception.getMessage());
         assertNull(exception.getCause());
     }

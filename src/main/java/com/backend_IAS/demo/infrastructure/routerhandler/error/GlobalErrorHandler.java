@@ -2,8 +2,11 @@ package com.backend_IAS.demo.infrastructure.routerhandler.error;
 
 import com.backend_IAS.demo.application.dto.ErrorResponseDto;
 import com.backend_IAS.demo.exception.application.ApplicationNotFoundException;
+import com.backend_IAS.demo.exception.application.CustomerNotFoundException;
+import com.backend_IAS.demo.exception.application.RateLimitExceededException;
+import com.backend_IAS.demo.exception.database.PersistenceTimeoutException;
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
-import com.backend_IAS.demo.exception.application.ReferenceConflictException;
+import com.backend_IAS.demo.exception.application.IdempotencyConflictException;
 import com.backend_IAS.demo.exception.message.ErrorCodes;
 import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import java.util.UUID;
@@ -13,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -56,20 +60,35 @@ public class GlobalErrorHandler implements WebExceptionHandler {
                     exchange.getResponse().setStatusCode(httpError.getStatus());
                     exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
                     exchange.getResponse().getHeaders().set(InfrastructureMessages.TRACE_ID_HEADER, traceId);
+                    if (error instanceof RateLimitExceededException rateLimitError) {
+                        exchange.getResponse().getHeaders().set(HttpHeaders.RETRY_AFTER,
+                                Long.toString(rateLimitError.getRetryAfterSeconds()));
+                    }
                     return exchange.getResponse().writeWith(Mono.just(
                             exchange.getResponse().bufferFactory().wrap(bytes)));
                 });
     }
 
     private HttpError describeError(Throwable error) {
+        if (error instanceof PersistenceTimeoutException) {
+            return new HttpError(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.DATABASE_TIMEOUT,
+                    InfrastructureMessages.DATABASE_TIMEOUT);
+        }
+        if (error instanceof RateLimitExceededException) {
+            return new HttpError(HttpStatus.TOO_MANY_REQUESTS, ErrorCodes.RATE_LIMIT_EXCEEDED,
+                    InfrastructureMessages.RATE_LIMIT_EXCEEDED);
+        }
         if (error instanceof InvalidApplicationDataException) {
             return new HttpError(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_APPLICATION_DATA, error.getMessage());
         }
         if (error instanceof ApplicationNotFoundException) {
             return new HttpError(HttpStatus.NOT_FOUND, ErrorCodes.APPLICATION_NOT_FOUND, error.getMessage());
         }
-        if (error instanceof ReferenceConflictException) {
-            return new HttpError(HttpStatus.CONFLICT, ErrorCodes.REFERENCE_CONFLICT, error.getMessage());
+        if (error instanceof CustomerNotFoundException) {
+            return new HttpError(HttpStatus.NOT_FOUND, ErrorCodes.CUSTOMER_NOT_FOUND, error.getMessage());
+        }
+        if (error instanceof IdempotencyConflictException) {
+            return new HttpError(HttpStatus.CONFLICT, ErrorCodes.IDEMPOTENCY_CONFLICT, error.getMessage());
         }
         if (error instanceof DataBufferLimitException) {
             return describeHttpStatus(HttpStatus.CONTENT_TOO_LARGE);
@@ -90,7 +109,7 @@ public class GlobalErrorHandler implements WebExceptionHandler {
             case 404 -> new HttpError(status, ErrorCodes.RESOURCE_NOT_FOUND, InfrastructureMessages.RESOURCE_NOT_FOUND);
             case 405 -> new HttpError(status, ErrorCodes.METHOD_NOT_ALLOWED, InfrastructureMessages.METHOD_NOT_ALLOWED);
             case 406 -> new HttpError(status, ErrorCodes.NOT_ACCEPTABLE, InfrastructureMessages.NOT_ACCEPTABLE);
-            case 409 -> new HttpError(status, ErrorCodes.REFERENCE_CONFLICT, InfrastructureMessages.REFERENCE_CONFLICT);
+            case 409 -> new HttpError(status, ErrorCodes.IDEMPOTENCY_CONFLICT, InfrastructureMessages.IDEMPOTENCY_CONFLICT);
             case 413 -> new HttpError(status, ErrorCodes.PAYLOAD_TOO_LARGE, InfrastructureMessages.PAYLOAD_TOO_LARGE);
             case 415 -> new HttpError(status, ErrorCodes.UNSUPPORTED_MEDIA_TYPE, InfrastructureMessages.UNSUPPORTED_MEDIA_TYPE);
             default -> new HttpError(status, status.is5xxServerError() ? ErrorCodes.INTERNAL_ERROR : ErrorCodes.HTTP_ERROR,

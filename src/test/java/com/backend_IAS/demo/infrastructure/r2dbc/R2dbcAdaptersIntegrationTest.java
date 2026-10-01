@@ -21,7 +21,7 @@ import com.backend_IAS.demo.domain.port.portout.ApplicationPort;
 import com.backend_IAS.demo.domain.port.portout.CustomerPort;
 import com.backend_IAS.demo.domain.port.portout.TransactionPort;
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
-import com.backend_IAS.demo.exception.database.DuplicateReferenceException;
+import com.backend_IAS.demo.exception.database.DuplicateIdempotencyKeyException;
 import com.backend_IAS.demo.exception.database.PersistenceFailureException;
 import io.r2dbc.spi.ConnectionFactory;
 import java.math.BigDecimal;
@@ -111,6 +111,8 @@ class R2dbcAdaptersIntegrationTest {
         CreditApplication saved = applicationPort.insert(requested).block(TIMEOUT);
         assertNotNull(saved);
         assertNotNull(saved.getProcessedAt());
+        assertEquals("REF-001", saved.getData().getApplicationReference());
+        assertEquals(requested.getData().getIdempotencyKey(), saved.getData().getIdempotencyKey());
         assertNotEquals(requested.getProcessedAt(), saved.getProcessedAt());
         assertEquals("CLI-1001", saved.getIdentifiedCustomerId());
         assertEquals(0, requested.getData().getAmount().compareTo(saved.getData().getAmount()));
@@ -135,7 +137,7 @@ class R2dbcAdaptersIntegrationTest {
 
         applicationPort.insert(requested).block(TIMEOUT);
 
-        StepVerifier.create(applicationPort.findByReference("REF-UNKNOWN"))
+        StepVerifier.create(applicationPort.findByIdempotencyKey(key("REF-UNKNOWN")))
                 .assertNext(application -> {
                     assertEquals("CLI-MISSING", application.getData().getCustomerId());
                     assertNull(application.getIdentifiedCustomerId());
@@ -161,13 +163,13 @@ class R2dbcAdaptersIntegrationTest {
     }
 
     @Test
-    void shouldRejectDuplicateReferenceAcrossCustomersWithoutOverwritingOriginal() {
+    void shouldRejectDuplicateKeyAcrossCustomersWithoutOverwritingOriginal() {
         CreditApplication original = applicationPort.insert(approved("REF-001", "CLI-1001", "1000"))
                 .block(TIMEOUT);
 
         StepVerifier.create(applicationPort.insert(approved("REF-001", "CLI-2001", "2000")))
                 .expectErrorSatisfies(error -> {
-                    assertTrue(error instanceof DuplicateReferenceException);
+                    assertTrue(error instanceof DuplicateIdempotencyKeyException);
                     assertNotNull(error.getCause());
                 })
                 .verify();
@@ -177,7 +179,7 @@ class R2dbcAdaptersIntegrationTest {
     }
 
     @Test
-    void shouldNotClassifyAnotherUniqueConstraintAsDuplicateReference() {
+    void shouldNotClassifyAnotherUniqueConstraintAsDuplicateKey() {
         databaseClient.sql("CREATE UNIQUE INDEX uq_test_amount ON credit_applications(amount)")
                 .then().block(TIMEOUT);
         applicationPort.insert(approved("REF-001", "CLI-1001", "1000")).block(TIMEOUT);
@@ -192,20 +194,31 @@ class R2dbcAdaptersIntegrationTest {
         StepVerifier.create(applicationPort.insert(approved("REF-INVALID", "CLI-MISSING", "1000")))
                 .expectError(PersistenceFailureException.class)
                 .verify();
-        StepVerifier.create(applicationPort.findByReference("REF-INVALID")).verifyComplete();
+        StepVerifier.create(applicationPort.findByIdempotencyKey(key("REF-INVALID"))).verifyComplete();
     }
 
     @Test
-    void shouldListRecentApplicationsWithStableTieBreakerAndLimit() {
+    void shouldPageApplicationsWithStableTieBreakerAndTotal() {
         for (int index = 1; index <= 3; index++) {
             applicationPort.insert(approved("REF-00" + index, "CLI-1001", "1000")).block(TIMEOUT);
         }
         databaseClient.sql("UPDATE credit_applications SET processed_at = '2026-10-01T12:00:00Z'")
                 .then().block(TIMEOUT);
 
-        StepVerifier.create(applicationPort.listRecent(2))
-                .expectNextMatches(application -> application.getData().getApplicationReference().equals("REF-003"))
-                .expectNextMatches(application -> application.getData().getApplicationReference().equals("REF-002"))
+        StepVerifier.create(applicationPort.findPage(0, 2))
+                .assertNext(page -> {
+                    assertEquals(3, page.getTotalElements());
+                    assertEquals(2, page.getTotalPages());
+                    assertTrue(page.isFirst());
+                    assertFalse(page.isLast());
+                    assertEquals("REF-003", page.getContent().get(0).getData().getApplicationReference());
+                    assertEquals("REF-002", page.getContent().get(1).getData().getApplicationReference());
+                })
+                .verifyComplete();
+        StepVerifier.create(applicationPort.findPage(1, 2))
+                .expectNextMatches(page -> page.getTotalElements() == 3 && page.getContent().size() == 1
+                        && page.isLast() && !page.isFirst()
+                        && page.getContent().getFirst().getData().getApplicationReference().equals("REF-001"))
                 .verifyComplete();
     }
 
@@ -218,7 +231,7 @@ class R2dbcAdaptersIntegrationTest {
                         .then(Mono.error(failure))))
                 .expectErrorSatisfies(error -> assertSame(failure, error))
                 .verify();
-        StepVerifier.create(applicationPort.findByReference("REF-ROLLBACK")).verifyComplete();
+        StepVerifier.create(applicationPort.findByIdempotencyKey(key("REF-ROLLBACK"))).verifyComplete();
     }
 
     @Test
@@ -240,10 +253,10 @@ class R2dbcAdaptersIntegrationTest {
     void shouldCommitBeforeDeliveringResultToAnotherConnection() {
         StepVerifier.create(transactionPort.execute(() ->
                 applicationPort.insert(approved("REF-COMMITTED", "CLI-1001", "1000")))
-                .flatMap(saved -> applicationPort.findByReference("REF-COMMITTED")
+                .flatMap(saved -> applicationPort.findByReference(saved.getData().getApplicationReference())
                         .switchIfEmpty(Mono.error(new AssertionError("Result emitted before commit")))))
                 .expectNextMatches(application -> application.getData()
-                        .getApplicationReference().equals("REF-COMMITTED"))
+                        .getApplicationReference().equals("REF-001"))
                 .verifyComplete();
     }
 
@@ -259,7 +272,7 @@ class R2dbcAdaptersIntegrationTest {
                 applicationPort.insert(approved("REF-COMMIT-FAILURE", "CLI-MISSING", "1000"))))
                 .expectError(PersistenceFailureException.class)
                 .verify();
-        StepVerifier.create(applicationPort.findByReference("REF-COMMIT-FAILURE")).verifyComplete();
+        StepVerifier.create(applicationPort.findByIdempotencyKey(key("REF-COMMIT-FAILURE"))).verifyComplete();
     }
 
     @Test
@@ -306,10 +319,39 @@ class R2dbcAdaptersIntegrationTest {
 
     private ApplicationData data(String reference, String customerId, String amount) {
         return ApplicationData.builder()
-                .applicationReference(reference)
+                .applicationReference("IGNORED-CLIENT-REFERENCE")
+                .idempotencyKey(key(reference))
                 .customerId(customerId)
                 .amount(new BigDecimal(amount))
                 .termMonths(12)
                 .build();
+    }
+
+    private String key(String label) {
+        return java.util.UUID.nameUUIDFromBytes(label.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+    }
+
+    @Test
+    void shouldGenerateReferencesBeyondThreeDigitsWithoutTruncation() {
+        databaseClient.sql("SELECT setval('credit_applications_reference_seq', 999, false)")
+                .then().block(TIMEOUT);
+        var first = applicationPort.insert(approved("KEY-999", "CLI-1001", "1000")).block(TIMEOUT);
+        var second = applicationPort.insert(approved("KEY-1000", "CLI-1001", "1000")).block(TIMEOUT);
+        assertNotNull(first);
+        assertNotNull(second);
+        assertEquals("REF-999", first.getData().getApplicationReference());
+        assertEquals("REF-1000", second.getData().getApplicationReference());
+        StepVerifier.create(applicationPort.findByReference("REF-1000")).expectNext(second).verifyComplete();
+    }
+
+    @Test
+    void shouldGenerateUniqueReferencesForConcurrentInserts() {
+        var saved = reactor.core.publisher.Flux.range(1, 20)
+                .flatMap(index -> applicationPort.insert(approved("KEY-" + index, "CLI-1001", "1000")), 4)
+                .collectList().block(TIMEOUT);
+        assertNotNull(saved);
+        assertEquals(20, saved.size());
+        assertEquals(20, saved.stream().map(application -> application.getData().getApplicationReference()).distinct().count());
+        assertTrue(saved.stream().allMatch(application -> application.getData().getApplicationReference().matches("REF-[0-9]{3,}")));
     }
 }

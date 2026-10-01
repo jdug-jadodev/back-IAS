@@ -12,7 +12,7 @@ public final class ApplicationMatchingRules {
     public static boolean matches(ApplicationData original, ApplicationData other) {
         Objects.requireNonNull(original, DomainMessages.ORIGINAL_REQUIRED);
         return other != null
-                && Objects.equals(original.getApplicationReference(), other.getApplicationReference())
+                && Objects.equals(original.getIdempotencyKey(), other.getIdempotencyKey())
                 && Objects.equals(original.getCustomerId(), other.getCustomerId())
                 && original.getAmount() != null
                 && other.getAmount() != null

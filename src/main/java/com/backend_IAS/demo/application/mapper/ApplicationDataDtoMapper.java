@@ -14,6 +14,7 @@ public final class ApplicationDataDtoMapper {
         }
         return ApplicationDataDto.builder()
                 .applicationReference(data.getApplicationReference())
+                .idempotencyKey(data.getIdempotencyKey())
                 .customerId(data.getCustomerId())
                 .amount(data.getAmount())
                 .termMonths(data.getTermMonths())
@@ -23,6 +24,7 @@ public final class ApplicationDataDtoMapper {
     public static ApplicationData toDomain(ApplicationDataDto data) {
         return ApplicationData.builder()
                 .applicationReference(data.getApplicationReference())
+                .idempotencyKey(data.getIdempotencyKey())
                 .customerId(data.getCustomerId())
                 .amount(data.getAmount())
                 .termMonths(data.getTermMonths())

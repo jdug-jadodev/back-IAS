@@ -8,6 +8,7 @@ import lombok.*;
 @AllArgsConstructor
 public class ApplicationData {
     private final String applicationReference;
+    private final String idempotencyKey;
     private final String customerId;
     private final BigDecimal amount;
     private final Integer termMonths;

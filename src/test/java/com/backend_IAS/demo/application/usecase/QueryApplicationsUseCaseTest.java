@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.backend_IAS.demo.application.validation.ApplicationValidator;
 import com.backend_IAS.demo.domain.entity.ApplicationData;
+import com.backend_IAS.demo.domain.entity.ApplicationPage;
+import com.backend_IAS.demo.domain.factory.ApplicationPageFactory;
 import com.backend_IAS.demo.domain.entity.CreditApplication;
 import com.backend_IAS.demo.domain.entity.CreditDecision;
 import com.backend_IAS.demo.domain.enums.ApplicationStatus;
@@ -17,8 +19,8 @@ import com.backend_IAS.demo.exception.application.ApplicationNotFoundException;
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -76,27 +78,30 @@ class QueryApplicationsUseCaseTest {
     }
 
     @Test
-    void shouldAcceptRecentLimitBoundariesAndQueryOnlyOnSubscription() {
+    void shouldAcceptPageSizeBoundariesAndQueryOnlyOnSubscription() {
         CreditApplication application = application();
-        for (int limit : new int[]{1, 100}) {
-            when(applicationPort.listRecent(limit)).thenReturn(Flux.just(application));
+        for (int size : new int[]{1, 100}) {
+            when(applicationPort.findPage(0, size)).thenReturn(
+                    Mono.just(ApplicationPageFactory.create(List.of(application), 0, size, 1)));
         }
 
-        Flux<CreditApplication> minimumLimitResult = useCase.findRecent(1);
-        Flux<CreditApplication> maximumLimitResult = useCase.findRecent(100);
+        Mono<ApplicationPage> minimumSizeResult = useCase.findPage(0, 1);
+        Mono<ApplicationPage> maximumSizeResult = useCase.findPage(0, 100);
 
         verifyNoInteractions(applicationPort);
-        StepVerifier.create(minimumLimitResult).expectNext(application).verifyComplete();
-        StepVerifier.create(maximumLimitResult).expectNext(application).verifyComplete();
-        verify(applicationPort).listRecent(1);
-        verify(applicationPort).listRecent(100);
+        StepVerifier.create(minimumSizeResult)
+                .expectNext(ApplicationPageFactory.create(List.of(application), 0, 1, 1)).verifyComplete();
+        StepVerifier.create(maximumSizeResult)
+                .expectNext(ApplicationPageFactory.create(List.of(application), 0, 100, 1)).verifyComplete();
+        verify(applicationPort).findPage(0, 1);
+        verify(applicationPort).findPage(0, 100);
         verifyNoMoreInteractions(applicationPort);
     }
 
     @Test
-    void shouldRejectRecentLimitOutsideRangeWithoutQueryingPersistence() {
-        for (int limit : new int[]{-1, 0, 101}) {
-            StepVerifier.create(useCase.findRecent(limit))
+    void shouldRejectInvalidPageAndSizeWithoutQueryingPersistence() {
+        for (int[] pagination : new int[][]{{-1, 20}, {0, -1}, {0, 0}, {0, 101}}) {
+            StepVerifier.create(useCase.findPage(pagination[0], pagination[1]))
                     .expectError(InvalidApplicationDataException.class)
                     .verify();
         }
@@ -105,18 +110,19 @@ class QueryApplicationsUseCaseTest {
     }
 
     @Test
-    void shouldReturnEmptyListWhenThereAreNoApplications() {
-        when(applicationPort.listRecent(20)).thenReturn(Flux.empty());
+    void shouldReturnAnEmptyPageWhenThereAreNoApplications() {
+        ApplicationPage emptyPage = ApplicationPageFactory.create(List.of(), 0, 20, 0);
+        when(applicationPort.findPage(0, 20)).thenReturn(Mono.just(emptyPage));
 
-        StepVerifier.create(useCase.findRecent(20)).verifyComplete();
+        StepVerifier.create(useCase.findPage(0, 20)).expectNext(emptyPage).verifyComplete();
     }
 
     @Test
-    void shouldPropagateRecentQueryFailureWithoutReturningEmptyList() {
+    void shouldPropagatePageQueryFailureWithoutReturningAnEmptyPage() {
         RuntimeException failure = new RuntimeException("Persistence unavailable");
-        when(applicationPort.listRecent(20)).thenReturn(Flux.error(failure));
+        when(applicationPort.findPage(0, 20)).thenReturn(Mono.error(failure));
 
-        StepVerifier.create(useCase.findRecent(20))
+        StepVerifier.create(useCase.findPage(0, 20))
                 .expectErrorMatches(error -> error == failure)
                 .verify();
     }

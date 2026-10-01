@@ -13,6 +13,9 @@ public class ApplicationDataDto {
     @JsonProperty("applicationReference")
     private final String applicationReference;
 
+    @JsonProperty("idempotencyKey")
+    private final String idempotencyKey;
+
     @JsonProperty("customerId")
     private final String customerId;
 

@@ -14,9 +14,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
-import com.backend_IAS.demo.exception.database.DuplicateReferenceException;
+import com.backend_IAS.demo.exception.database.DuplicateIdempotencyKeyException;
 import com.backend_IAS.demo.exception.database.PersistenceFailureException;
+import com.backend_IAS.demo.exception.database.PersistenceTimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +37,7 @@ class R2dbcTransactionAdapterTest {
     private final ReactiveTransactionManager transactionManager = mock(ReactiveTransactionManager.class);
     private final ReactiveTransaction transaction = mock(ReactiveTransaction.class);
     private final R2dbcTransactionAdapter adapter =
-            new R2dbcTransactionAdapter(TransactionalOperator.create(transactionManager));
+            new R2dbcTransactionAdapter(TransactionalOperator.create(transactionManager), Duration.ofSeconds(10));
 
     @BeforeEach
     void configureTransactionManager() {
@@ -155,7 +157,7 @@ class R2dbcTransactionAdapterTest {
 
     @Test
     void shouldPreserveTranslatedDuplicateAfterRollback() {
-        DuplicateReferenceException failure = new DuplicateReferenceException(new IllegalStateException("Duplicate"));
+        DuplicateIdempotencyKeyException failure = new DuplicateIdempotencyKeyException(new IllegalStateException("Duplicate"));
 
         StepVerifier.create(adapter.execute(() -> Mono.error(failure)))
                 .expectErrorMatches(error -> error == failure)
@@ -173,6 +175,23 @@ class R2dbcTransactionAdapterTest {
 
         verify(transactionManager).rollback(transaction);
         verify(transactionManager, never()).commit(any());
+    }
+
+    @Test
+    void shouldCompleteRollbackBeforeEmittingOperationTimeout() {
+        Sinks.Empty<Void> rollbackCompleted = Sinks.empty();
+        when(transactionManager.rollback(transaction)).thenReturn(rollbackCompleted.asMono());
+
+        StepVerifier.withVirtualTime(() -> adapter.execute(Mono::never))
+                .thenAwait(Duration.ofSeconds(10))
+                .then(() -> {
+                    verify(transactionManager).rollback(transaction);
+                    verify(transactionManager, never()).commit(any());
+                })
+                .expectNoEvent(Duration.ofSeconds(1))
+                .then(() -> rollbackCompleted.tryEmitEmpty())
+                .expectError(PersistenceTimeoutException.class)
+                .verify();
     }
 
     private boolean hasCause(Throwable error, Throwable expected) {

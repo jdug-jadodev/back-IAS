@@ -18,9 +18,9 @@ public final class ApplicationDtoMapper {
     private ApplicationDtoMapper() {
     }
 
-    public static ApplicationData toDomain(ApplicationRequestDto request) {
+    public static ApplicationData toDomain(ApplicationRequestDto request, String idempotencyKey) {
         return ApplicationData.builder()
-                .applicationReference(request.getApplicationReference())
+                .idempotencyKey(idempotencyKey == null ? null : idempotencyKey.toLowerCase(java.util.Locale.ROOT))
                 .customerId(request.getCustomerId())
                 .amount(request.getAmount())
                 .termMonths(request.getTermMonths())
@@ -31,7 +31,7 @@ public final class ApplicationDtoMapper {
         return toResponse(CreditApplicationDtoMapper.toDto(application));
     }
 
-    private static ApplicationResponseDto toResponse(CreditApplicationDto application) {
+    public static ApplicationResponseDto toResponse(CreditApplicationDto application) {
         ApplicationDataDto data = application.getData();
         CreditDecisionDto decision = application.getDecision();
         RejectionReason reason = decision.getReason();

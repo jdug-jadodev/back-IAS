@@ -42,8 +42,8 @@ class DatabaseExceptionsTest {
 
     private static Stream<Arguments> exceptionTypes() {
         return Stream.of(
-                Arguments.of((Function<Throwable, RuntimeException>) DuplicateReferenceException::new,
-                        "Ya existe una solicitud con la referencia indicada"),
+                Arguments.of((Function<Throwable, RuntimeException>) DuplicateIdempotencyKeyException::new,
+                        "Ya existe una solicitud con la clave de idempotencia indicada"),
                 Arguments.of((Function<Throwable, RuntimeException>) PersistenceFailureException::new,
                         "No fue posible completar la operación de base de datos"));
     }

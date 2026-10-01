@@ -1,8 +1,10 @@
 package com.backend_IAS.demo.infrastructure.r2dbc.adapter;
 
 import com.backend_IAS.demo.domain.entity.CreditApplication;
+import com.backend_IAS.demo.domain.entity.ApplicationPage;
 import com.backend_IAS.demo.domain.port.portout.ApplicationPort;
 import com.backend_IAS.demo.infrastructure.r2dbc.mapper.ApplicationEntityMapper;
+import com.backend_IAS.demo.infrastructure.r2dbc.mapper.ApplicationPageEntityMapper;
 import com.backend_IAS.demo.infrastructure.r2dbc.mapper.PersistenceErrorMapper;
 import com.backend_IAS.demo.infrastructure.r2dbc.repository.ApplicationR2dbcRepository;
 import java.math.BigDecimal;
@@ -16,6 +18,13 @@ import reactor.core.publisher.Mono;
 public class ApplicationR2dbcAdapter implements ApplicationPort {
 
     private final ApplicationR2dbcRepository repository;
+
+    @Override
+    public Mono<CreditApplication> findByIdempotencyKey(String idempotencyKey) {
+        return Mono.defer(() -> repository.findByIdempotencyKey(idempotencyKey))
+                .map(ApplicationEntityMapper::toDomain)
+                .onErrorMap(PersistenceErrorMapper::mapFailure);
+    }
 
     @Override
     public Mono<CreditApplication> findByReference(String applicationReference) {
@@ -38,9 +47,10 @@ public class ApplicationR2dbcAdapter implements ApplicationPort {
     }
 
     @Override
-    public Flux<CreditApplication> listRecent(int limit) {
-        return Flux.defer(() -> repository.listRecent(limit))
-                .map(ApplicationEntityMapper::toDomain)
+    public Mono<ApplicationPage> findPage(int page, int size) {
+        return Flux.defer(() -> repository.findPage(size, (long) page * size))
+                .collectList()
+                .map(rows -> ApplicationPageEntityMapper.toDomain(rows, page, size))
                 .onErrorMap(PersistenceErrorMapper::mapFailure);
     }
 }
