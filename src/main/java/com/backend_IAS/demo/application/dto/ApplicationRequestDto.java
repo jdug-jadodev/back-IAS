@@ -13,11 +13,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class ApplicationRequestDto {
-    @JsonProperty("applicationReference")
-    @Schema(description = "Referencia única; reutilizarla únicamente para reintentar los mismos datos",
-            example = "SWAGGER-001", requiredMode = Schema.RequiredMode.REQUIRED)
-    private String applicationReference;
-
     @JsonProperty("customerId")
     @Schema(description = "Identificador del cliente", example = "CLI-1001",
             requiredMode = Schema.RequiredMode.REQUIRED)

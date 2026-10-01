@@ -24,6 +24,9 @@ public class ApplicationEntity {
     @Column("application_reference")
     private String applicationReference;
 
+    @Column("idempotency_key")
+    private String idempotencyKey;
+
     @Column("requested_customer_id")
     private String requestedCustomerId;
 

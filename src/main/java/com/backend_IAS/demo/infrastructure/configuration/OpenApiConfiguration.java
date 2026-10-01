@@ -13,6 +13,9 @@ import org.springframework.context.annotation.Configuration;
                 description = "Procesamiento y consulta de solicitudes de crédito. "
                         + "Los rechazos de negocio se guardan y responden HTTP 201. "
                         + "Los errores incluyen traceId y la cabecera X-Trace-Id con el mismo valor."),
-        tags = @Tag(name = "Applications", description = "Solicitudes de crédito"))
+        tags = {
+                @Tag(name = "Applications", description = "Solicitudes de crédito"),
+                @Tag(name = "Customers", description = "Consulta del cupo de clientes")
+        })
 public class OpenApiConfiguration {
 }

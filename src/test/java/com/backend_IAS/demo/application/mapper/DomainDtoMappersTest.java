@@ -33,6 +33,7 @@ class DomainDtoMappersTest {
     void shouldPreserveAmountsAndBusinessRejectionInputs(String amount, int termMonths) {
         ApplicationData original = ApplicationData.builder()
                 .applicationReference(" REF-001 ")
+                .idempotencyKey("83b36c7f-6a2f-466a-8581-d9ac7f655038")
                 .customerId(" CLI-1001 ")
                 .amount(new BigDecimal(amount))
                 .termMonths(termMonths)

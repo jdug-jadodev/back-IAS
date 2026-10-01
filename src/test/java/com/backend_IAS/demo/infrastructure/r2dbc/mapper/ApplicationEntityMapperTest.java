@@ -25,6 +25,7 @@ class ApplicationEntityMapperTest {
         ApplicationEntity entity = ApplicationEntity.builder()
                 .id(42L)
                 .applicationReference("REF-UNKNOWN")
+                .idempotencyKey("83b36c7f-6a2f-466a-8581-d9ac7f655038")
                 .requestedCustomerId("CLI-MISSING")
                 .amount(new BigDecimal("1000.123456789123456789"))
                 .termMonths(12)
@@ -37,6 +38,7 @@ class ApplicationEntityMapperTest {
         CreditApplication application = ApplicationEntityMapper.toDomain(entity);
 
         assertEquals("REF-UNKNOWN", application.getData().getApplicationReference());
+        assertEquals(entity.getIdempotencyKey(), application.getData().getIdempotencyKey());
         assertEquals("CLI-MISSING", application.getData().getCustomerId());
         assertEquals(new BigDecimal("1000.123456789123456789"), application.getData().getAmount());
         assertEquals(12, application.getData().getTermMonths());
@@ -48,6 +50,7 @@ class ApplicationEntityMapperTest {
         assertEquals(Instant.parse("2026-10-01T12:00:00.123456Z"), application.getProcessedAt());
 
         ApplicationEntity remapped = ApplicationEntityMapper.toEntity(application);
+        assertEquals(entity.getIdempotencyKey(), remapped.getIdempotencyKey());
         assertEquals(entity.getRequestedCustomerId(), remapped.getRequestedCustomerId());
         assertNull(remapped.getIdentifiedCustomerId());
         assertEquals(entity.getReason(), remapped.getReason());

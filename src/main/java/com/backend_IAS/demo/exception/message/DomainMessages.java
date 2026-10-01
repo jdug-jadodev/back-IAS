@@ -19,6 +19,8 @@ public final class DomainMessages {
     public static final String DECISION_REQUIRED = "decision is required";
     public static final String REASON_REQUIRED = "reason is required";
     public static final String APPLICATION_REQUIRED = "application is required";
+    public static final String PAGE_CONTENT_REQUIRED = "page content is required";
+    public static final String PAGINATION_INVALID = "Page, size and total elements must be valid";
     public static final String CUSTOMER_APPLICATION_MISMATCH = "Customer does not match application";
     public static final String NEGATIVE_APPROVED_TOTAL_OR_CREDIT_LIMIT =
             "Approved total and credit limit must not be negative";

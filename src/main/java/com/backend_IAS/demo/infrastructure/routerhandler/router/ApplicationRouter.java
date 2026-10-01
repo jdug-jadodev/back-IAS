@@ -1,17 +1,18 @@
 package com.backend_IAS.demo.infrastructure.routerhandler.router;
 
 import com.backend_IAS.demo.application.dto.ApplicationRequestDto;
+import com.backend_IAS.demo.application.dto.ApplicationPageResponseDto;
 import com.backend_IAS.demo.application.dto.ApplicationResponseDto;
 import com.backend_IAS.demo.application.dto.ErrorResponseDto;
 import com.backend_IAS.demo.infrastructure.routerhandler.handler.ApplicationHandler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
-import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.headers.Header;
 import org.springdoc.core.annotations.RouterOperation;
 import org.springdoc.core.annotations.RouterOperations;
 import org.springframework.context.annotation.Bean;
@@ -37,8 +38,13 @@ public class ApplicationRouter {
                             tags = "Applications",
                             summary = "Procesar una solicitud de crédito",
                             description = "Guarda una nueva solicitud aprobada o rechazada. "
-                                    + "Un reintento con la misma referencia y datos devuelve el resultado original "
+                                    + "PostgreSQL genera la referencia REF-001, REF-002… al guardar. "
+                                    + "Un reintento con la misma Idempotency-Key y datos devuelve el resultado original "
                                     + "sin consumir cupo adicional. El monto se compara numéricamente.",
+                            parameters = @Parameter(name = "Idempotency-Key", in = ParameterIn.HEADER, required = true,
+                                    description = "UUID generado una vez por solicitud y reutilizado en todos sus reintentos",
+                                    schema = @Schema(type = "string", format = "uuid"),
+                                    example = "83b36c7f-6a2f-466a-8581-d9ac7f655038"),
                             requestBody = @RequestBody(
                                     required = true,
                                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -53,15 +59,23 @@ public class ApplicationRouter {
                                     @ApiResponse(responseCode = "400", description = "Datos obligatorios ausentes, identificadores en blanco o JSON inválido",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
-                                    @ApiResponse(responseCode = "409", description = "La referencia ya existe con datos diferentes",
+                                    @ApiResponse(responseCode = "409", description = "La clave de idempotencia ya existe con datos diferentes",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
                                     @ApiResponse(responseCode = "413", description = "El cuerpo supera el tamaño permitido",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
-                                    @ApiResponse(responseCode = "415", description = "Tipo de contenido no soportado",
-                                            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                                                    schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "415", description = "Tipo de contenido no soportado",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "429", description = "Cuota temporal de solicitudes agotada",
+                                             headers = @Header(name = "Retry-After", description = "Segundos mínimos antes de intentar de nuevo",
+                                                     schema = @Schema(type = "integer", format = "int64")),
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "503", description = "Tiempo de espera de base de datos agotado",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
                                     @ApiResponse(responseCode = "500", description = "Fallo técnico al procesar la solicitud",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class)))
@@ -86,9 +100,12 @@ public class ApplicationRouter {
                                     @ApiResponse(responseCode = "400", description = "Referencia inválida",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
-                                    @ApiResponse(responseCode = "404", description = "La solicitud no existe",
-                                            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                                                    schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "404", description = "La solicitud no existe",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "503", description = "Tiempo de espera de base de datos agotado",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
                                     @ApiResponse(responseCode = "500", description = "Fallo técnico al consultar la solicitud",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class)))
@@ -97,25 +114,32 @@ public class ApplicationRouter {
                     path = "/applications",
                     method = RequestMethod.GET,
                     beanClass = ApplicationHandler.class,
-                    beanMethod = "findRecent",
+                    beanMethod = "findPage",
                     operation = @Operation(
-                            operationId = "findRecentApplications",
+                            operationId = "findApplicationPage",
                             tags = "Applications",
-                            summary = "Listar las solicitudes recientes",
+                            summary = "Consultar las solicitudes por páginas",
                             description = "Devuelve aprobaciones y rechazos del más reciente al más antiguo. "
-                                    + "Si no existen solicitudes, devuelve una lista vacía.",
-                            parameters = @Parameter(
-                                    name = "limit", in = ParameterIn.QUERY,
-                                    description = "Número máximo de solicitudes; entre 1 y 100",
-                                    schema = @Schema(type = "integer", format = "int32",
-                                            minimum = "1", maximum = "100", defaultValue = "20"), example = "20"),
+                                    + "Incluye totales. Una página sin resultados devuelve content vacío. "
+                                    + "Los parámetros son page y size; limit ya no está disponible.",
+                            parameters = {
+                                    @Parameter(name = "page", in = ParameterIn.QUERY,
+                                            description = "Índice de página, comienza en cero",
+                                            schema = @Schema(type = "integer", format = "int32", minimum = "0", defaultValue = "0")),
+                                    @Parameter(name = "size", in = ParameterIn.QUERY,
+                                            description = "Máximo de solicitudes por página, entre 1 y 100",
+                                            schema = @Schema(type = "integer", format = "int32", minimum = "1", maximum = "100", defaultValue = "20"))
+                            },
                             responses = {
-                                    @ApiResponse(responseCode = "200", description = "Lista de solicitudes recientes",
+                                    @ApiResponse(responseCode = "200", description = "Página de solicitudes y totales",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                                                    array = @ArraySchema(schema = @Schema(implementation = ApplicationResponseDto.class)))),
-                                    @ApiResponse(responseCode = "400", description = "El límite no es un entero entre 1 y 100",
-                                            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                                                    schema = @Schema(implementation = ErrorResponseDto.class))),
+                                                    schema = @Schema(implementation = ApplicationPageResponseDto.class))),
+                                     @ApiResponse(responseCode = "400", description = "Parámetros de paginación inválidos o uso de limit",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
+                                     @ApiResponse(responseCode = "503", description = "Tiempo de espera de base de datos agotado",
+                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                                     schema = @Schema(implementation = ErrorResponseDto.class))),
                                     @ApiResponse(responseCode = "500", description = "Fallo técnico al listar solicitudes",
                                             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                                                     schema = @Schema(implementation = ErrorResponseDto.class)))
@@ -125,7 +149,7 @@ public class ApplicationRouter {
         return RouterFunctions.route()
                 .POST("/applications", handler::process)
                 .GET("/applications/{reference}", handler::findByReference)
-                .GET("/applications", handler::findRecent)
+                .GET("/applications", handler::findPage)
                 .build();
     }
 }

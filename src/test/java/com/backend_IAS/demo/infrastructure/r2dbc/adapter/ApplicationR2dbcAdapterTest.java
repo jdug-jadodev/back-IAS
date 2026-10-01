@@ -11,13 +11,15 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.backend_IAS.demo.domain.entity.ApplicationData;
+import com.backend_IAS.demo.domain.entity.ApplicationPage;
 import com.backend_IAS.demo.domain.entity.CreditApplication;
 import com.backend_IAS.demo.domain.entity.CreditDecision;
 import com.backend_IAS.demo.domain.enums.ApplicationStatus;
 import com.backend_IAS.demo.domain.enums.RejectionReason;
-import com.backend_IAS.demo.exception.database.DuplicateReferenceException;
+import com.backend_IAS.demo.exception.database.DuplicateIdempotencyKeyException;
 import com.backend_IAS.demo.exception.database.PersistenceFailureException;
 import com.backend_IAS.demo.infrastructure.r2dbc.entity.ApplicationEntity;
+import com.backend_IAS.demo.infrastructure.r2dbc.entity.ApplicationPageEntity;
 import com.backend_IAS.demo.infrastructure.r2dbc.repository.ApplicationR2dbcRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -143,29 +145,53 @@ class ApplicationR2dbcAdapterTest {
     }
 
     @Test
-    void shouldPassRecentLimitAndPreserveRepositoryOrder() {
-        when(repository.listRecent(2)).thenReturn(Flux.just(entity("REF-003"), entity("REF-002")));
+    void shouldPassLimitAndOffsetAndPreserveRepositoryOrder() {
+        when(repository.findPage(2, 2L)).thenReturn(Flux.just(pageRow("REF-003", 6), pageRow("REF-002", 6)));
 
-        Flux<CreditApplication> result = adapter.listRecent(2);
+        Mono<ApplicationPage> result = adapter.findPage(1, 2);
 
         verifyNoInteractions(repository);
         StepVerifier.create(result)
-                .expectNextMatches(application -> application.getData().getApplicationReference().equals("REF-003"))
-                .expectNextMatches(application -> application.getData().getApplicationReference().equals("REF-002"))
+                .assertNext(page -> {
+                    assertEquals(1, page.getPage());
+                    assertEquals(2, page.getSize());
+                    assertEquals(6, page.getTotalElements());
+                    assertEquals(3, page.getTotalPages());
+                    assertEquals("REF-003", page.getContent().get(0).getData().getApplicationReference());
+                    assertEquals("REF-002", page.getContent().get(1).getData().getApplicationReference());
+                })
                 .verifyComplete();
-        verify(repository).listRecent(2);
+        verify(repository).findPage(2, 2L);
         verifyNoMoreInteractions(repository);
     }
 
     @Test
-    void shouldPreserveEmptyRecentList() {
-        when(repository.listRecent(20)).thenReturn(Flux.empty());
+    void shouldPreserveTotalForAnEmptyPageBeyondTheLastPage() {
+        when(repository.findPage(20, 40L)).thenReturn(Flux.just(ApplicationPageEntity.builder().totalElements(3).build()));
 
-        StepVerifier.create(adapter.listRecent(20)).verifyComplete();
+        StepVerifier.create(adapter.findPage(2, 20))
+                .expectNextMatches(page -> page.getContent().isEmpty() && page.getTotalElements() == 3 && page.isLast())
+                .verifyComplete();
+    }
+
+    @Test
+    void shouldCalculateLargeOffsetsWithoutIntegerOverflow() {
+        when(repository.findPage(100, 214748364700L))
+                .thenReturn(Flux.just(ApplicationPageEntity.builder().totalElements(0).build()));
+        StepVerifier.create(adapter.findPage(Integer.MAX_VALUE, 100))
+                .expectNextMatches(page -> page.getPage() == Integer.MAX_VALUE && page.getContent().isEmpty())
+                .verifyComplete();
+        verify(repository).findPage(100, 214748364700L);
+    }
+
+    @Test
+    void shouldFailRatherThanInventATotalWhenPageQueryReturnsNoRows() {
+        when(repository.findPage(20, 0L)).thenReturn(Flux.empty());
+        StepVerifier.create(adapter.findPage(0, 20)).expectError(PersistenceFailureException.class).verify();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"reference", "total", "insert", "recent"})
+    @ValueSource(strings = {"reference", "key", "total", "insert", "page"})
     void shouldTranslateReactiveDatabaseFailuresAndPreserveTheirCause(String operation) {
         Throwable failure = new DataAccessResourceFailureException("Database unavailable");
 
@@ -178,7 +204,7 @@ class ApplicationR2dbcAdapterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"reference", "total", "insert", "recent"})
+    @ValueSource(strings = {"reference", "key", "total", "insert", "page"})
     void shouldCaptureSynchronousRepositoryFailuresInTheReactivePipeline(String operation) {
         Throwable failure = new DataAccessResourceFailureException("Repository invocation failed");
 
@@ -194,8 +220,8 @@ class ApplicationR2dbcAdapterTest {
     }
 
     @Test
-    void shouldPropagateDuplicateReferenceWithoutRetryingOrOverwriting() {
-        DuplicateReferenceException failure = new DuplicateReferenceException(new IllegalStateException("Duplicate"));
+    void shouldPropagateDuplicateKeyWithoutRetryingOrOverwriting() {
+        DuplicateIdempotencyKeyException failure = new DuplicateIdempotencyKeyException(new IllegalStateException("Duplicate"));
         when(repository.insert(any(ApplicationEntity.class))).thenReturn(Mono.error(failure));
 
         StepVerifier.create(adapter.insert(application())).expectErrorMatches(error -> error == failure).verify();
@@ -214,6 +240,14 @@ class ApplicationR2dbcAdapterTest {
 
     private Publisher<?> failingOperation(String operation, Throwable failure, boolean synchronous) {
         return switch (operation) {
+            case "key" -> {
+                if (synchronous) {
+                    when(repository.findByIdempotencyKey("test-key")).thenThrow(failure);
+                } else {
+                    when(repository.findByIdempotencyKey("test-key")).thenReturn(Mono.error(failure));
+                }
+                yield adapter.findByIdempotencyKey("test-key");
+            }
             case "reference" -> {
                 if (synchronous) {
                     when(repository.findByApplicationReference("REF-001")).thenThrow(failure);
@@ -238,13 +272,13 @@ class ApplicationR2dbcAdapterTest {
                 }
                 yield adapter.insert(application());
             }
-            case "recent" -> {
+            case "page" -> {
                 if (synchronous) {
-                    when(repository.listRecent(20)).thenThrow(failure);
+                    when(repository.findPage(20, 0L)).thenThrow(failure);
                 } else {
-                    when(repository.listRecent(20)).thenReturn(Flux.error(failure));
+                    when(repository.findPage(20, 0L)).thenReturn(Flux.error(failure));
                 }
-                yield adapter.listRecent(20);
+                yield adapter.findPage(0, 20);
             }
             default -> throw new IllegalArgumentException("Unknown test operation: " + operation);
         };
@@ -260,6 +294,21 @@ class ApplicationR2dbcAdapterTest {
                 .termMonths(12)
                 .status("APPROVED")
                 .processedAt(OffsetDateTime.parse("2026-10-01T12:00:00Z"))
+                .build();
+    }
+
+    private ApplicationPageEntity pageRow(String reference, long totalElements) {
+        ApplicationEntity application = entity(reference);
+        return ApplicationPageEntity.builder()
+                .id(application.getId())
+                .applicationReference(application.getApplicationReference())
+                .requestedCustomerId(application.getRequestedCustomerId())
+                .identifiedCustomerId(application.getIdentifiedCustomerId())
+                .amount(application.getAmount())
+                .termMonths(application.getTermMonths())
+                .status(application.getStatus())
+                .processedAt(application.getProcessedAt())
+                .totalElements(totalElements)
                 .build();
     }
 

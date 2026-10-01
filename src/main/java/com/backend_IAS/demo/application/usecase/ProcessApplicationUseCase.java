@@ -21,8 +21,8 @@ import com.backend_IAS.demo.domain.port.portout.TransactionPort;
 import com.backend_IAS.demo.domain.rule.ApplicationMatchingRules;
 import com.backend_IAS.demo.domain.rule.ApprovalRules;
 import com.backend_IAS.demo.exception.application.CustomerNotFoundException;
-import com.backend_IAS.demo.exception.application.ReferenceConflictException;
-import com.backend_IAS.demo.exception.database.DuplicateReferenceException;
+import com.backend_IAS.demo.exception.application.IdempotencyConflictException;
+import com.backend_IAS.demo.exception.database.DuplicateIdempotencyKeyException;
 import com.backend_IAS.demo.exception.database.PersistenceFailureException;
 import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import lombok.RequiredArgsConstructor;
@@ -48,7 +48,7 @@ public final class ProcessApplicationUseCase implements ProcessApplicationPort {
     private Mono<ProcessingResultDto> processDto(ApplicationDataDto data) {
         return Mono.defer(() -> {
             validator.validate(data);
-            return applicationPort.findByReference(data.getApplicationReference())
+            return applicationPort.findByIdempotencyKey(data.getIdempotencyKey())
                     .map(CreditApplicationDtoMapper::toDto)
                     .flatMap(original -> resolveExisting(data, original))
                     .switchIfEmpty(Mono.defer(() -> processNew(data)));
@@ -58,7 +58,7 @@ public final class ProcessApplicationUseCase implements ProcessApplicationPort {
     private Mono<ProcessingResultDto> resolveExisting(ApplicationDataDto data, CreditApplicationDto original) {
         if (!ApplicationMatchingRules.matches(
                 ApplicationDataDtoMapper.toDomain(original.getData()), ApplicationDataDtoMapper.toDomain(data))) {
-            return Mono.error(new ReferenceConflictException(data.getApplicationReference()));
+            return Mono.error(new IdempotencyConflictException(data.getIdempotencyKey()));
         }
         return Mono.just(ProcessingResultDto.builder()
                 .application(original)
@@ -68,8 +68,8 @@ public final class ProcessApplicationUseCase implements ProcessApplicationPort {
 
     private Mono<ProcessingResultDto> processNew(ApplicationDataDto data) {
         return transactionPort.execute(() -> evaluateAndInsert(data))
-                .onErrorResume(DuplicateReferenceException.class, error ->
-                        applicationPort.findByReference(data.getApplicationReference())
+                .onErrorResume(DuplicateIdempotencyKeyException.class, error ->
+                        applicationPort.findByIdempotencyKey(data.getIdempotencyKey())
                                 .map(CreditApplicationDtoMapper::toDto)
                                 .switchIfEmpty(Mono.error(() -> new PersistenceFailureException(error)))
                                 .flatMap(original -> resolveExisting(data, original)));

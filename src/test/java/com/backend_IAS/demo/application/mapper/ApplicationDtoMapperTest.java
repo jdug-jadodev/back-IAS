@@ -25,15 +25,15 @@ class ApplicationDtoMapperTest {
     @Test
     void shouldNotNormalizeIdentifiersOrRejectBusinessValuesWhileMappingRequest() {
         ApplicationRequestDto request = ApplicationRequestDto.builder()
-                .applicationReference(" REF-001 ")
                 .customerId(" CLI-1001 ")
                 .amount(new BigDecimal("-0.000000000000000001"))
                 .termMonths(5)
                 .build();
 
-        ApplicationData data = ApplicationDtoMapper.toDomain(request);
+        ApplicationData data = ApplicationDtoMapper.toDomain(request, "83B36C7F-6A2F-466A-8581-D9AC7F655038");
 
-        assertEquals(" REF-001 ", data.getApplicationReference());
+        assertNull(data.getApplicationReference());
+        assertEquals("83b36c7f-6a2f-466a-8581-d9ac7f655038", data.getIdempotencyKey());
         assertEquals(" CLI-1001 ", data.getCustomerId());
         assertEquals(new BigDecimal("-0.000000000000000001"), data.getAmount());
         assertEquals(5, data.getTermMonths());
@@ -41,7 +41,7 @@ class ApplicationDtoMapperTest {
 
     @Test
     void shouldLeaveMissingRequestFieldsForTheValidator() {
-        ApplicationData data = ApplicationDtoMapper.toDomain(ApplicationRequestDto.builder().build());
+        ApplicationData data = ApplicationDtoMapper.toDomain(ApplicationRequestDto.builder().build(), null);
 
         assertNull(data.getApplicationReference());
         assertNull(data.getCustomerId());

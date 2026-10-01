@@ -17,6 +17,7 @@ public final class ApplicationEntityMapper {
         return CreditApplication.builder()
                 .data(ApplicationData.builder()
                         .applicationReference(entity.getApplicationReference())
+                        .idempotencyKey(entity.getIdempotencyKey())
                         .customerId(entity.getRequestedCustomerId())
                         .amount(entity.getAmount())
                         .termMonths(entity.getTermMonths())
@@ -38,6 +39,7 @@ public final class ApplicationEntityMapper {
 
         return ApplicationEntity.builder()
                 .applicationReference(data.getApplicationReference())
+                .idempotencyKey(data.getIdempotencyKey())
                 .requestedCustomerId(data.getCustomerId())
                 .identifiedCustomerId(application.getIdentifiedCustomerId())
                 .amount(data.getAmount())

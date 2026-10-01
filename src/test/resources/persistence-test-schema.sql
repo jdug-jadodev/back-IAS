@@ -1,5 +1,14 @@
 DROP TABLE IF EXISTS credit_applications;
 DROP TABLE IF EXISTS customers;
+DROP FUNCTION IF EXISTS next_application_reference();
+DROP SEQUENCE IF EXISTS credit_applications_reference_seq;
+
+CREATE SEQUENCE credit_applications_reference_seq AS BIGINT START WITH 1;
+CREATE FUNCTION next_application_reference() RETURNS TEXT
+LANGUAGE SQL VOLATILE AS '
+    SELECT ''REF-'' || CASE WHEN length(value) < 3 THEN lpad(value, 3, ''0'') ELSE value END
+    FROM (SELECT nextval(''credit_applications_reference_seq'')::TEXT AS value) sequence_value
+';
 
 CREATE TABLE customers (
     customer_id TEXT PRIMARY KEY CHECK (btrim(customer_id) <> ''),
@@ -12,7 +21,8 @@ CREATE TABLE customers (
 
 CREATE TABLE credit_applications (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    application_reference TEXT NOT NULL CHECK (btrim(application_reference) <> ''),
+    application_reference TEXT NOT NULL DEFAULT next_application_reference() CHECK (btrim(application_reference) <> ''),
+    idempotency_key TEXT NOT NULL CHECK (idempotency_key ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
     requested_customer_id TEXT NOT NULL CHECK (btrim(requested_customer_id) <> ''),
     customer_id TEXT,
     amount NUMERIC NOT NULL CHECK (
@@ -24,6 +34,7 @@ CREATE TABLE credit_applications (
     reason TEXT,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT uq_credit_applications_reference UNIQUE (application_reference),
+    CONSTRAINT uq_credit_applications_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT fk_credit_applications_customer FOREIGN KEY (customer_id)
         REFERENCES customers(customer_id) ON DELETE RESTRICT,
     CONSTRAINT ck_credit_applications_decision CHECK (
