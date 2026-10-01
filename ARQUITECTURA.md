@@ -1,6 +1,6 @@
 # Arquitectura del core de créditos
 
-**Estado:** diseño para implementar. No incluye código funcional ni el modelo de tablas.
+**Estado:** implementación parcial. Existen modelos, puertos, DTO, mappers, consultas de aplicación y adaptadores R2DBC. El procesamiento del crédito, las reglas, las migraciones y la configuración de ejecución local siguen pendientes.
 
 **Base:** el enunciado exige procesar, conservar y consultar solicitudes, proteger el cupo ante concurrencia y conservar el resultado original ante referencias repetidas. También exige Java con WebFlux y Angular. [^prueba]
 
@@ -78,8 +78,8 @@ Contiene modelos, reglas de aprobación y puertos de entrada y salida.
 |---|---|
 | `ApplicationData` | `applicationReference`, `customerId`, `amount`, `termMonths`. Representa lo recibido, todavía sin aprobar. |
 | `Customer` | Identificador, estado y cupo máximo. |
-| `CreditDecision` | Aprobación o rechazo, con motivo cuando corresponda. |
-| `CreditApplication` | Datos de la solicitud, decisión y fecha de procesamiento. |
+| `CreditDecision` | Aprobación o rechazo, con motivo y descripción histórica cuando corresponda. |
+| `CreditApplication` | Datos de la solicitud, decisión, fecha de procesamiento y `identifiedCustomerId` opcional. |
 | `ProcessingResult` | Solicitud procesada y un indicador `created`, para distinguir creación de repetición. |
 
 Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para la fecha. Son modelos del negocio, **no entidades de base de datos**.
@@ -94,6 +94,8 @@ Los casos de uso implementan los puertos de entrada. Validan manualmente, consul
 
 Aquí viven `ApplicationRequestDto`, `ApplicationResponseDto`, `ErrorResponseDto`, `ApplicationDtoMapper` y `ApplicationValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación.
 
+Estado actual de consultas: `QueryApplicationsUseCase` implementa `QueryApplicationsPort`, valida mediante `ApplicationValidator` y consulta `ApplicationPort`. La referencia debe estar presente y no estar en blanco; el límite debe estar entre 1 y 100. Si la búsqueda queda vacía, emite `ApplicationNotFoundException`. Los datos inválidos generan `InvalidApplicationDataException` y los fallos técnicos se propagan. La validación y el acceso al puerto se difieren hasta la suscripción.
+
 Los mappers son totalmente manuales: métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto`. El monto del request es `BigDecimal`; en el response se devuelve como `String` mediante `toPlainString()`, sin redondearlo.
 
 **Los puertos del dominio no reciben DTO de aplicación.** El handler usa `ApplicationDtoMapper` para convertir el DTO a `ApplicationData`; luego llama al puerto. Así dominio no necesita importar aplicación.
@@ -107,6 +109,12 @@ Cada adaptador R2DBC implementa un puerto de salida e inyecta su repositorio té
 La interfaz técnica extiende **`R2dbcRepository` de Spring Data**, no el driver PostgreSQL. El driver se configura como parte de la conexión. [^repositorios]
 
 Los mappers de infraestructura convierten `CustomerEntity` y `ApplicationEntity` a modelos de dominio y viceversa. No validan reglas ni deciden aprobaciones.
+
+Adaptadores implementados en `infrastructure/output/r2dbc`: `CustomerR2dbcAdapter` obtiene al cliente mediante `SELECT ... FOR UPDATE`; `ApplicationR2dbcAdapter` consulta referencias, suma únicamente aprobaciones, inserta mediante `INSERT ... RETURNING` y lista por `processed_at DESC, id DESC`. Los repositorios extienden `R2dbcRepository`. La inserción no utiliza `save` ni sobrescribe resultados anteriores.
+
+`ApplicationData.customerId` conserva el identificador recibido; `CreditApplication.identifiedCustomerId` conserva el vínculo opcional con el cliente conocido. `CreditDecision.reasonDescription` conserva el mensaje histórico. El mapper mapea esos datos explícitamente y la respuesta utiliza el mensaje persistido cuando existe. La fecha definitiva se obtiene de PostgreSQL mediante `RETURNING` y se convierte de `OffsetDateTime` a `Instant`.
+
+`PersistenceErrorMapper` traduce únicamente fallos técnicos conocidos y conserva su causa. La duplicidad de referencia se identifica mediante SQLSTATE `23505` y el nombre exacto `uq_credit_applications_reference`, utilizando los detalles del driver PostgreSQL; otras restricciones generan `PersistenceFailureException`.
 
 ### Excepciones: tipos compartidos, separados por origen
 
@@ -146,9 +154,9 @@ El handler inyecta los puertos de entrada y utiliza los métodos estáticos de `
 
 Otro caso de uso puede llamar un puerto de entrada cuando realmente necesite esa operación completa, sin ciclos entre casos de uso. No crear esa dependencia solo para reutilizar una validación.
 
-La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. `infrastructure/configuration` construye los casos de uso mediante `@Bean` y los expone por su interfaz. Las pruebas y esta configuración sí pueden conocer las implementaciones.
+La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. Por decisión posterior del proyecto, los casos de uso se registran mediante `@Service` y se inyectan por su interfaz. `ProcessApplicationUseCase` recibe `CustomerPort`, `ApplicationPort` y `TransactionPort`; `QueryApplicationsUseCase` recibe `ApplicationPort` y `ApplicationValidator`. `infrastructure/configuration` registra el validador y la configuración transaccional mediante `@Bean`.
 
-**Límites:** dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura ni Spring. Infraestructura puede importar las capas internas. El paquete `exception` no depende de ellas. Se acepta Reactor en los puertos y en aplicación; los modelos y las reglas no necesitan Reactor.
+**Límites:** dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura; se permite `@Service` para registrar casos de uso, pero no APIs de persistencia o transacciones de Spring. Infraestructura puede importar las capas internas. El paquete `exception` no depende de ellas. Se acepta Reactor en los puertos y en aplicación; los modelos y las reglas no necesitan Reactor.
 
 ## 5. Transacción y recorrido de una solicitud
 
@@ -161,6 +169,8 @@ Contrato de `TransactionPort`:
 ```
 
 El adaptador usa `TransactionalOperator` sobre el `Mono` creado con `Mono.defer(operation)`. La configuración usa `R2dbcTransactionManager`, la misma `ConnectionFactory` de los repositorios y aislamiento `READ_COMMITTED`. No poner `TransactionalOperator` ni `@Transactional` en los casos de uso. [^transacciones]
+
+Implementación actual: `R2dbcTransactionAdapter` utiliza `TransactionalOperator.execute(status -> Mono.defer(operation)).singleOrEmpty()` para conservar el resultado hasta completar la transacción y no emitirlo si falla el commit. `PersistenceConfiguration` registra el gestor y el operador transaccional.
 
 ### Camino principal
 

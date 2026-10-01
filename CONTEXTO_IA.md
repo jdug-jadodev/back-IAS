@@ -1,6 +1,6 @@
 # Contexto de implementación: core de créditos
 
-Especificación resumida. `ARQUITECTURA.md` contiene las decisiones completas y sus fuentes. Estado: diseño; no asumir que existen código, tablas o contenedores implementados. No modelar la base de datos ni añadir funcionalidades sin una solicitud posterior.
+Especificación resumida. `ARQUITECTURA.md` contiene las decisiones completas y sus fuentes. Estado: implementación parcial; revisar el avance descrito antes de asumir que una funcionalidad, tabla o contenedor ya está implementado. Añadir funcionalidades únicamente conforme a las solicitudes del usuario.
 
 ## Stack y límites
 
@@ -30,7 +30,15 @@ Los casos de uso inyectan `CustomerPort`, `ApplicationPort` y `TransactionPort`.
 
 Los puertos reciben modelos de dominio, nunca DTO de aplicación ni entidades R2DBC. El handler convierte DTO a `ApplicationData` mediante el mapper de aplicación. Infraestructura convierte entidades de base a dominio.
 
-Dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura ni Spring. Excepciones propias dependen solo de Java. Reactor se permite en puertos y aplicación. Configurar casos de uso con `@Bean` en infraestructura; inyección por constructor. No crear ciclos entre casos de uso.
+Consultas implementadas en `application/usecase/QueryApplicationsUseCase`, que implementa `QueryApplicationsPort` y recibe `ApplicationPort` y `ApplicationValidator` por constructor. Valida referencia no nula ni blanca y límite de 1 a 100. Una referencia inexistente emite `ApplicationNotFoundException`; datos de consulta inválidos emiten `InvalidApplicationDataException`. Los fallos de persistencia se propagan. Validación y consulta se ejecutan al suscribirse mediante `Mono.defer` / `Flux.defer`. El procesamiento y la implementación de `ApprovalRules` siguen pendientes.
+
+Dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura; los casos de uso se registran mediante `@Service`, por decisión posterior del proyecto. No importar APIs de persistencia o transacciones de Spring en aplicación. Excepciones propias dependen solo de Java. Reactor se permite en puertos y aplicación. Inyección por constructor con dependencias `final`. No crear ciclos entre casos de uso.
+
+`ProcessApplicationUseCase` recibe `CustomerPort`, `ApplicationPort` y `TransactionPort`; su flujo de procesamiento sigue pendiente. `QueryApplicationsUseCase` recibe únicamente `ApplicationPort` como puerto de salida. `ApplicationValidator` se registra en `infrastructure/configuration/ApplicationConfiguration`.
+
+Persistencia implementada en `infrastructure/output/r2dbc`: entidades `CustomerEntity` y `ApplicationEntity`, repositorios que extienden `R2dbcRepository`, mappers manuales estáticos con builders y adaptadores `CustomerR2dbcAdapter` / `ApplicationR2dbcAdapter`. La inserción usa `INSERT ... RETURNING`, nunca `save` ni actualización. La fecha definitiva la genera PostgreSQL. `CreditApplication.identifiedCustomerId` conserva el vínculo opcional; `CreditDecision.reasonDescription` conserva la explicación histórica del rechazo. Los mappers no consultan clientes ni reconstruyen el vínculo.
+
+`R2dbcTransactionAdapter` implementa `TransactionPort` con `TransactionalOperator.execute` y `singleOrEmpty` para entregar el resultado después del commit. `PersistenceConfiguration` registra el gestor y el operador transaccional con `READ_COMMITTED` y la misma `ConnectionFactory`. `PersistenceErrorMapper` traduce fallos conocidos conservando la causa; solo la restricción `uq_credit_applications_reference` con SQLSTATE `23505` genera `DuplicateReferenceException`. Las migraciones y la conexión local de ejecución siguen pendientes; el SQL en `src/test/resources` es exclusivamente para pruebas.
 
 ## Negocio y flujo
 

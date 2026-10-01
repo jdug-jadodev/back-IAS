@@ -34,7 +34,13 @@ public final class ApplicationDtoMapper {
                 .status(decision.getStatus().name())
                 .processedAt(application.getProcessedAt())
                 .reasonCode(reason == null ? null : reason.getCode())
-                .reason(reason == null ? null : reason.getDescription())
+                .reason(reason == null ? null : rejectionDescription(decision))
                 .build();
+    }
+
+    private static String rejectionDescription(CreditDecision decision) {
+        return decision.getReasonDescription() == null
+                ? decision.getReason().getDescription()
+                : decision.getReasonDescription();
     }
 }

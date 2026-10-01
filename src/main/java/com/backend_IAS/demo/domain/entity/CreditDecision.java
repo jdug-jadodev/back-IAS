@@ -10,4 +10,5 @@ import lombok.*;
 public class CreditDecision {
     private final ApplicationStatus status;
     private final RejectionReason reason;
+    private final String reasonDescription;
 }
