@@ -1,5 +1,6 @@
 package com.backend_IAS.demo.exception.application;
 
+import com.backend_IAS.demo.exception.message.ApplicationMessages;
 import java.io.Serial;
 
 public class CustomerNotFoundException extends RuntimeException {
@@ -8,6 +9,6 @@ public class CustomerNotFoundException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     public CustomerNotFoundException(String customerId) {
-        super("No se encontró el cliente con identificador: " + customerId);
+        super(ApplicationMessages.CUSTOMER_NOT_FOUND.formatted(customerId));
     }
 }

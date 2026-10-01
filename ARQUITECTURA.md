@@ -68,7 +68,8 @@ com/backend_IAS/demo/
 │   └── configuration/
 └── exception/
     ├── application/
-    └── database/
+    ├── database/
+    └── message/
 ```
 
 No crear adaptadores vacíos para colas. Se incorporarán cuando exista esa integración.
@@ -132,6 +133,8 @@ Adaptadores implementados en `infrastructure/r2dbc`: `CustomerR2dbcAdapter` obti
 ### Excepciones: tipos compartidos, separados por origen
 
 Este paquete reúne excepciones propias de aplicación y persistencia. Sus clases dependen solo de Java: no importan HTTP, Spring ni el driver. Pueden conservar la causa original como `Throwable`.
+
+`exception/message` centraliza los textos del código en clases `final` con constructor privado y constantes `public static final String`: `ValidationMessages`, `ApplicationMessages`, `DomainMessages`, `InfrastructureMessages` y `ErrorCodes`. Los consumidores referencian las constantes; los textos que incluyen identificadores usan plantillas `%s` y `.formatted(...)`. Los mensajes públicos permanecen en español y los diagnósticos internos en inglés. Estas clases no dependen de otras capas. Los textos de Swagger se mantienen en sus anotaciones y configuración, por indicación del usuario.
 
 El adaptador interpreta el error técnico; aplicación decide las recuperaciones previstas; `GlobalErrorHandler` construye la respuesta HTTP. Las excepciones no escriben logs por sí mismas.
 

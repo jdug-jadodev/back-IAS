@@ -6,6 +6,7 @@ import com.backend_IAS.demo.domain.entity.Customer;
 import com.backend_IAS.demo.domain.enums.CustomerStatus;
 import com.backend_IAS.demo.domain.enums.RejectionReason;
 import com.backend_IAS.demo.domain.factory.CreditDecisionFactory;
+import com.backend_IAS.demo.exception.message.DomainMessages;
 import java.math.BigDecimal;
 import java.util.Objects;
 
@@ -15,19 +16,19 @@ public final class ApprovalRules {
     public static final int MAX_TERM_MONTHS = 60;
 
     public CreditDecision evaluate(ApplicationData data, Customer customer, BigDecimal totalApproved) {
-        Objects.requireNonNull(data, "data is required");
-        Objects.requireNonNull(customer, "customer is required");
-        Objects.requireNonNull(totalApproved, "totalApproved is required");
-        BigDecimal amount = Objects.requireNonNull(data.getAmount(), "amount is required");
-        Integer termMonths = Objects.requireNonNull(data.getTermMonths(), "termMonths is required");
-        CustomerStatus status = Objects.requireNonNull(customer.getStatus(), "customer status is required");
-        BigDecimal creditLimit = Objects.requireNonNull(customer.getCreditLimit(), "creditLimit is required");
+        Objects.requireNonNull(data, DomainMessages.DATA_REQUIRED);
+        Objects.requireNonNull(customer, DomainMessages.CUSTOMER_REQUIRED);
+        Objects.requireNonNull(totalApproved, DomainMessages.TOTAL_APPROVED_REQUIRED);
+        BigDecimal amount = Objects.requireNonNull(data.getAmount(), DomainMessages.AMOUNT_REQUIRED);
+        Integer termMonths = Objects.requireNonNull(data.getTermMonths(), DomainMessages.TERM_MONTHS_REQUIRED);
+        CustomerStatus status = Objects.requireNonNull(customer.getStatus(), DomainMessages.CUSTOMER_STATUS_REQUIRED);
+        BigDecimal creditLimit = Objects.requireNonNull(customer.getCreditLimit(), DomainMessages.CREDIT_LIMIT_REQUIRED);
 
         if (!Objects.equals(data.getCustomerId(), customer.getCustomerId())) {
-            throw new IllegalArgumentException("Customer does not match application");
+            throw new IllegalArgumentException(DomainMessages.CUSTOMER_APPLICATION_MISMATCH);
         }
         if (totalApproved.signum() < 0 || creditLimit.signum() < 0) {
-            throw new IllegalArgumentException("Approved total and credit limit must not be negative");
+            throw new IllegalArgumentException(DomainMessages.NEGATIVE_APPROVED_TOTAL_OR_CREDIT_LIMIT);
         }
         if (amount.signum() <= 0) {
             return CreditDecisionFactory.rejected(RejectionReason.INVALID_AMOUNT);

@@ -4,6 +4,8 @@ import com.backend_IAS.demo.application.dto.ErrorResponseDto;
 import com.backend_IAS.demo.exception.application.ApplicationNotFoundException;
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
 import com.backend_IAS.demo.exception.application.ReferenceConflictException;
+import com.backend_IAS.demo.exception.message.ErrorCodes;
+import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +40,7 @@ public class GlobalErrorHandler implements WebExceptionHandler {
         String traceId = UUID.randomUUID().toString();
         HttpError httpError = describeError(error);
         if (httpError.getStatus().is5xxServerError()) {
-            log.error("HTTP request failed: traceId={}, method={}, path={}, status={}",
+            log.error(InfrastructureMessages.HTTP_REQUEST_FAILED_LOG,
                     traceId, exchange.getRequest().getMethod(), exchange.getRequest().getPath().value(),
                     httpError.getStatus().value(), error);
         }
@@ -53,7 +55,7 @@ public class GlobalErrorHandler implements WebExceptionHandler {
                 .flatMap(bytes -> {
                     exchange.getResponse().setStatusCode(httpError.getStatus());
                     exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-                    exchange.getResponse().getHeaders().set("X-Trace-Id", traceId);
+                    exchange.getResponse().getHeaders().set(InfrastructureMessages.TRACE_ID_HEADER, traceId);
                     return exchange.getResponse().writeWith(Mono.just(
                             exchange.getResponse().bufferFactory().wrap(bytes)));
                 });
@@ -61,20 +63,20 @@ public class GlobalErrorHandler implements WebExceptionHandler {
 
     private HttpError describeError(Throwable error) {
         if (error instanceof InvalidApplicationDataException) {
-            return new HttpError(HttpStatus.BAD_REQUEST, "INVALID_APPLICATION_DATA", error.getMessage());
+            return new HttpError(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_APPLICATION_DATA, error.getMessage());
         }
         if (error instanceof ApplicationNotFoundException) {
-            return new HttpError(HttpStatus.NOT_FOUND, "APPLICATION_NOT_FOUND", error.getMessage());
+            return new HttpError(HttpStatus.NOT_FOUND, ErrorCodes.APPLICATION_NOT_FOUND, error.getMessage());
         }
         if (error instanceof ReferenceConflictException) {
-            return new HttpError(HttpStatus.CONFLICT, "REFERENCE_CONFLICT", error.getMessage());
+            return new HttpError(HttpStatus.CONFLICT, ErrorCodes.REFERENCE_CONFLICT, error.getMessage());
         }
         if (error instanceof DataBufferLimitException) {
             return describeHttpStatus(HttpStatus.CONTENT_TOO_LARGE);
         }
         if (error instanceof ServerWebInputException) {
-            return new HttpError(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
-                    "El cuerpo o los parámetros de la petición no son válidos");
+            return new HttpError(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_REQUEST,
+                    InfrastructureMessages.INVALID_BODY_OR_PARAMETERS);
         }
         if (error instanceof ResponseStatusException statusException) {
             return describeHttpStatus(statusException.getStatusCode());
@@ -84,15 +86,15 @@ public class GlobalErrorHandler implements WebExceptionHandler {
 
     private HttpError describeHttpStatus(HttpStatusCode status) {
         return switch (status.value()) {
-            case 400 -> new HttpError(status, "INVALID_REQUEST", "La petición contiene datos inválidos");
-            case 404 -> new HttpError(status, "RESOURCE_NOT_FOUND", "El recurso solicitado no existe");
-            case 405 -> new HttpError(status, "METHOD_NOT_ALLOWED", "El método HTTP no está permitido para esta ruta");
-            case 406 -> new HttpError(status, "NOT_ACCEPTABLE", "El formato de respuesta solicitado no está disponible");
-            case 409 -> new HttpError(status, "REFERENCE_CONFLICT", "La referencia está asociada a datos diferentes");
-            case 413 -> new HttpError(status, "PAYLOAD_TOO_LARGE", "El cuerpo de la petición supera el tamaño permitido");
-            case 415 -> new HttpError(status, "UNSUPPORTED_MEDIA_TYPE", "El tipo de contenido de la petición no está soportado");
-            default -> new HttpError(status, status.is5xxServerError() ? "INTERNAL_ERROR" : "HTTP_ERROR",
-                    "No fue posible procesar la petición");
+            case 400 -> new HttpError(status, ErrorCodes.INVALID_REQUEST, InfrastructureMessages.INVALID_REQUEST);
+            case 404 -> new HttpError(status, ErrorCodes.RESOURCE_NOT_FOUND, InfrastructureMessages.RESOURCE_NOT_FOUND);
+            case 405 -> new HttpError(status, ErrorCodes.METHOD_NOT_ALLOWED, InfrastructureMessages.METHOD_NOT_ALLOWED);
+            case 406 -> new HttpError(status, ErrorCodes.NOT_ACCEPTABLE, InfrastructureMessages.NOT_ACCEPTABLE);
+            case 409 -> new HttpError(status, ErrorCodes.REFERENCE_CONFLICT, InfrastructureMessages.REFERENCE_CONFLICT);
+            case 413 -> new HttpError(status, ErrorCodes.PAYLOAD_TOO_LARGE, InfrastructureMessages.PAYLOAD_TOO_LARGE);
+            case 415 -> new HttpError(status, ErrorCodes.UNSUPPORTED_MEDIA_TYPE, InfrastructureMessages.UNSUPPORTED_MEDIA_TYPE);
+            default -> new HttpError(status, status.is5xxServerError() ? ErrorCodes.INTERNAL_ERROR : ErrorCodes.HTTP_ERROR,
+                    InfrastructureMessages.REQUEST_PROCESSING_FAILED);
         };
     }
 

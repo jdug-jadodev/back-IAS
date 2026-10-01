@@ -21,6 +21,9 @@ Los campos de los DTO de request y response declaran explícitamente su nombre J
 | `infrastructure` | Router, handler, manejador HTTP de errores, adaptadores R2DBC, entidades de base, sus mappers, repositorios técnicos, transacciones y configuración. |
 | `exception/application` | Datos inválidos, cliente inexistente, referencia en conflicto, solicitud no encontrada. |
 | `exception/database` | `DuplicateReferenceException`, `PersistenceFailureException`; tipos propios sin dependencias de Spring o PostgreSQL. |
+| `exception/message` | Constantes de textos y códigos en `ValidationMessages`, `ApplicationMessages`, `DomainMessages`, `InfrastructureMessages` y `ErrorCodes`. |
+
+Por decisión del usuario, centralizar los mensajes de validación, respuestas, excepciones, reglas y diagnósticos de infraestructura en `exception/message`. Usar clases `final` con constructor privado y constantes `public static final String`, referenciadas mediante el nombre de la clase. Las constantes no dependen de otras capas. Para mensajes con identificadores, usar plantillas `%s` y `.formatted(...)`. Conservar el texto existente: mensajes públicos en español y diagnósticos internos en inglés. Excluir los textos de Swagger de esta centralización.
 
 ## Contratos
 

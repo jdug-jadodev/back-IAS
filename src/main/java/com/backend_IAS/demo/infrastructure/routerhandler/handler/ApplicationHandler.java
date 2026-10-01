@@ -4,6 +4,7 @@ import com.backend_IAS.demo.application.dto.ApplicationRequestDto;
 import com.backend_IAS.demo.application.mapper.ApplicationDtoMapper;
 import com.backend_IAS.demo.domain.port.portin.ProcessApplicationPort;
 import com.backend_IAS.demo.domain.port.portin.QueryApplicationsPort;
+import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -25,9 +26,9 @@ public class ApplicationHandler {
     public Mono<ServerResponse> process(ServerRequest request) {
         return request.bodyToMono(ApplicationRequestDto.class)
                 .onErrorMap(ServerWebInputException.class, error -> new ServerWebInputException(
-                        "El cuerpo debe contener un JSON válido con los tipos de datos esperados", null, error))
+                        InfrastructureMessages.INVALID_JSON_BODY, null, error))
                 .switchIfEmpty(Mono.error(() -> new ServerWebInputException(
-                        "El cuerpo de la solicitud es obligatorio")))
+                        InfrastructureMessages.REQUEST_BODY_REQUIRED)))
                 .map(ApplicationDtoMapper::toDomain)
                 .flatMap(processApplicationPort::process)
                 .flatMap(result -> ServerResponse
@@ -61,7 +62,7 @@ public class ApplicationHandler {
         try {
             return Integer.parseInt(limit);
         } catch (NumberFormatException error) {
-            throw new ServerWebInputException("El parámetro limit debe ser un número entero", null, error);
+            throw new ServerWebInputException(InfrastructureMessages.RECENT_LIMIT_MUST_BE_INTEGER, null, error);
         }
     }
 }

@@ -11,6 +11,7 @@ import com.backend_IAS.demo.domain.entity.CreditApplication;
 import com.backend_IAS.demo.domain.entity.ProcessingResult;
 import com.backend_IAS.demo.domain.enums.ApplicationStatus;
 import com.backend_IAS.demo.domain.enums.RejectionReason;
+import com.backend_IAS.demo.exception.message.ApplicationMessages;
 
 public final class ApplicationDtoMapper {
 
@@ -56,8 +57,10 @@ public final class ApplicationDtoMapper {
     }
 
     private static String decisionMessage(CreditDecisionDto decision, boolean existing) {
-        String prefix = existing ? "Esta solicitud ya fue " : "Esta solicitud fue ";
-        return prefix + (decision.getStatus() == ApplicationStatus.APPROVED ? "aprobada" : "rechazada");
+        if (decision.getStatus() == ApplicationStatus.APPROVED) {
+            return existing ? ApplicationMessages.APPLICATION_ALREADY_APPROVED : ApplicationMessages.APPLICATION_APPROVED;
+        }
+        return existing ? ApplicationMessages.APPLICATION_ALREADY_REJECTED : ApplicationMessages.APPLICATION_REJECTED;
     }
 
     private static String rejectionDescription(CreditDecisionDto decision) {

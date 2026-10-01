@@ -1,6 +1,7 @@
 package com.backend_IAS.demo.domain.rule;
 
 import com.backend_IAS.demo.domain.entity.ApplicationData;
+import com.backend_IAS.demo.exception.message.DomainMessages;
 import java.util.Objects;
 
 public final class ApplicationMatchingRules {
@@ -9,7 +10,7 @@ public final class ApplicationMatchingRules {
     }
 
     public static boolean matches(ApplicationData original, ApplicationData other) {
-        Objects.requireNonNull(original, "original is required");
+        Objects.requireNonNull(original, DomainMessages.ORIGINAL_REQUIRED);
         return other != null
                 && Objects.equals(original.getApplicationReference(), other.getApplicationReference())
                 && Objects.equals(original.getCustomerId(), other.getCustomerId())
