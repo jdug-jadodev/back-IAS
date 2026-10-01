@@ -24,7 +24,7 @@ class ApprovalRulesTest {
                 new BigDecimal("3000000")
         );
 
-        assertTrue(decision.isApproved());
+        assertTrue(CreditDecisionRules.isApproved(decision));
     }
 
     @Test
@@ -35,7 +35,7 @@ class ApprovalRulesTest {
                 new BigDecimal("4000000")
         );
 
-        assertTrue(decision.isApproved());
+        assertTrue(CreditDecisionRules.isApproved(decision));
     }
 
     @Test
@@ -51,8 +51,8 @@ class ApprovalRulesTest {
                 BigDecimal.ZERO
         );
 
-        assertTrue(minimumTerm.isApproved());
-        assertTrue(maximumTerm.isApproved());
+        assertTrue(CreditDecisionRules.isApproved(minimumTerm));
+        assertTrue(CreditDecisionRules.isApproved(maximumTerm));
     }
 
     @Test
@@ -129,7 +129,7 @@ class ApprovalRulesTest {
     }
 
     private void assertRejected(CreditDecision decision, RejectionReason expectedReason) {
-        assertTrue(decision.isRejected());
+        assertTrue(CreditDecisionRules.isRejected(decision));
         assertEquals(expectedReason, decision.getReason());
     }
 

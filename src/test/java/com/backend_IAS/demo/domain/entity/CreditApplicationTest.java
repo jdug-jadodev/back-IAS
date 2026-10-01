@@ -10,6 +10,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 import com.backend_IAS.demo.domain.enums.RejectionReason;
+import com.backend_IAS.demo.domain.factory.CreditDecisionFactory;
+import com.backend_IAS.demo.domain.factory.ProcessingResultFactory;
+import com.backend_IAS.demo.domain.rule.CreditDecisionRules;
 import org.junit.jupiter.api.Test;
 
 class CreditApplicationTest {
@@ -20,10 +23,10 @@ class CreditApplicationTest {
     void shouldBuildApprovedApplication() {
         ApplicationData data = applicationData();
 
-        CreditApplication application = CreditApplication.approved(data, PROCESSED_AT);
+        CreditApplication application = approvedApplication(data);
 
         assertSame(data, application.getData());
-        assertTrue(application.getDecision().isApproved());
+        assertTrue(CreditDecisionRules.isApproved(application.getDecision()));
         assertNull(application.getDecision().getReason());
         assertEquals(PROCESSED_AT, application.getProcessedAt());
     }
@@ -32,22 +35,23 @@ class CreditApplicationTest {
     void shouldBuildRejectedApplication() {
         ApplicationData data = applicationData();
 
-        CreditApplication application = CreditApplication.rejected(
-                data,
-                RejectionReason.INSUFFICIENT_LIMIT,
-                PROCESSED_AT
-        );
+        CreditApplication application = CreditApplication.builder()
+                .data(data)
+                .decision(CreditDecisionFactory.rejected(RejectionReason.INSUFFICIENT_LIMIT))
+                .processedAt(PROCESSED_AT)
+                .identifiedCustomerId(data.getCustomerId())
+                .build();
 
-        assertTrue(application.getDecision().isRejected());
+        assertTrue(CreditDecisionRules.isRejected(application.getDecision()));
         assertEquals(RejectionReason.INSUFFICIENT_LIMIT, application.getDecision().getReason());
     }
 
     @Test
     void shouldDistinguishCreatedApplicationFromExistingApplication() {
-        CreditApplication application = CreditApplication.approved(applicationData(), PROCESSED_AT);
+        CreditApplication application = approvedApplication(applicationData());
 
-        ProcessingResult createdResult = ProcessingResult.created(application);
-        ProcessingResult existingResult = ProcessingResult.existing(application);
+        ProcessingResult createdResult = ProcessingResultFactory.created(application);
+        ProcessingResult existingResult = ProcessingResultFactory.existing(application);
 
         assertTrue(createdResult.isCreated());
         assertFalse(existingResult.isCreated());
@@ -57,5 +61,14 @@ class CreditApplicationTest {
 
     private ApplicationData applicationData() {
         return new ApplicationData("REF-001", "CLI-1001", new BigDecimal("1000000"), 12);
+    }
+
+    private CreditApplication approvedApplication(ApplicationData data) {
+        return CreditApplication.builder()
+                .data(data)
+                .decision(CreditDecisionFactory.approved())
+                .processedAt(PROCESSED_AT)
+                .identifiedCustomerId(data.getCustomerId())
+                .build();
     }
 }

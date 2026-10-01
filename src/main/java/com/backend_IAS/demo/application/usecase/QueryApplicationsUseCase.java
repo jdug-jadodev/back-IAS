@@ -1,5 +1,6 @@
 package com.backend_IAS.demo.application.usecase;
 
+import com.backend_IAS.demo.application.mapper.CreditApplicationDtoMapper;
 import com.backend_IAS.demo.application.validation.ApplicationValidator;
 import com.backend_IAS.demo.domain.entity.CreditApplication;
 import com.backend_IAS.demo.domain.port.portin.QueryApplicationsPort;
@@ -22,15 +23,17 @@ public final class QueryApplicationsUseCase implements QueryApplicationsPort {
         return Mono.defer(() -> {
             validator.validateReference(applicationReference);
             return applicationPort.findByReference(applicationReference)
+                    .map(CreditApplicationDtoMapper::toDto)
                     .switchIfEmpty(Mono.error(() -> new ApplicationNotFoundException(applicationReference)));
-        });
+        }).map(CreditApplicationDtoMapper::toDomain);
     }
 
     @Override
     public Flux<CreditApplication> findRecent(int limit) {
         return Flux.defer(() -> {
             validator.validateLimit(limit);
-            return applicationPort.listRecent(limit);
-        });
+            return applicationPort.listRecent(limit)
+                    .map(CreditApplicationDtoMapper::toDto);
+        }).map(CreditApplicationDtoMapper::toDomain);
     }
 }

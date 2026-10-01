@@ -63,5 +63,27 @@ Errors return `code`, `message` and `traceId`. Public messages are in Spanish, a
 `X-Trace-Id` contains the same identifier. Application lookup failures return 404;
 technical failures return 500 with a generic public message.
 
+## Swagger UI and OpenAPI
+
+After starting the backend, open:
+
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- OpenAPI YAML: `http://localhost:8080/v3/api-docs.yaml`
+
+The three functional routes are documented directly in `ApplicationRouter` with
+`@RouterOperations`. Swagger UI includes request examples, response schemas,
+the recent-list limit and HTTP error responses. API descriptions are in Spanish.
+`OpenApiConfiguration` defines the API title, version and tag.
+
+Expand an operation, select **Try it out**, edit the request or parameters, and
+select **Execute**. A POST uses the real processing flow and persists the decision.
+Use a new `applicationReference` for a new credit request; repeat the same
+reference and data to retrieve its original result without consuming more credit.
+
+Swagger UI, its configuration and the generated OpenAPI document were verified
+through HTTP on a temporary backend instance. No credit requests were created
+during that verification.
+
 The new processing and HTTP flow has been implemented; runtime verification is
 pending. No automated tests were run for this implementation stage.

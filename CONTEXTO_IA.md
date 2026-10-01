@@ -16,7 +16,7 @@ Los campos de los DTO de request y response declaran explícitamente su nombre J
 
 | Paquete | Contenido |
 |---|---|
-| `domain` | Modelos, `ApprovalRules`, `port/portin`, `port/portout`. |
+| `domain` | Entidades de datos, fábricas en `factory`, reglas en `rule`, `port/portin` y `port/portout`. |
 | `application` | Casos de uso, DTO, mappers DTO-dominio, validadores manuales. |
 | `infrastructure` | Router, handler, manejador HTTP de errores, adaptadores R2DBC, entidades de base, sus mappers, repositorios técnicos, transacciones y configuración. |
 | `exception/application` | Datos inválidos, cliente inexistente, referencia en conflicto, solicitud no encontrada. |
@@ -30,9 +30,13 @@ Los casos de uso inyectan `CustomerPort`, `ApplicationPort` y `TransactionPort`.
 
 Los puertos reciben modelos de dominio, nunca DTO de aplicación ni entidades R2DBC. El handler convierte DTO a `ApplicationData` mediante el mapper de aplicación. Infraestructura convierte entidades de base a dominio.
 
+Por decisión del usuario, los casos de uso trabajan internamente con `ApplicationDataDto`, `CustomerDto`, `CreditDecisionDto`, `CreditApplicationDto` y `ProcessingResultDto`. Las entidades de dominio se permiten únicamente en las firmas de los contratos y en los mappers. Convertir las entradas de puertos a DTO de inmediato y convertir a dominio al invocar puertos/reglas o devolver el resultado. No construir entidades de dominio en casos de uso ni almacenar entidades en campos de DTO. `ApplicationValidator.validate` recibe `ApplicationDataDto`. Los mappers estáticos `ApplicationDataDtoMapper`, `CustomerDtoMapper`, `CreditDecisionDtoMapper`, `CreditApplicationDtoMapper` y `ProcessingResultDtoMapper` implementan `toDto` / `toDomain` mediante builders, conservando los valores decimales, vínculo opcional, motivo histórico, fecha y señal de creación. `ApplicationDtoMapper` utiliza esos DTO internos para producir las respuestas HTTP.
+
 Consultas implementadas en `application/usecase/QueryApplicationsUseCase`, que implementa `QueryApplicationsPort` y recibe `ApplicationPort` y `ApplicationValidator` por constructor. Valida referencia no nula ni blanca y límite de 1 a 100. Una referencia inexistente emite `ApplicationNotFoundException`; datos de consulta inválidos emiten `InvalidApplicationDataException`. Los fallos de persistencia se propagan. Validación y consulta se ejecutan al suscribirse mediante `Mono.defer` / `Flux.defer`.
 
 Dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura; los casos de uso se registran mediante `@Service`, por decisión posterior del proyecto. No importar APIs de persistencia o transacciones de Spring en aplicación. Excepciones propias dependen solo de Java. Reactor se permite en puertos y aplicación. Inyección por constructor con dependencias `final`. No crear ciclos entre casos de uso.
+
+Por decisión del usuario, las entidades de dominio contienen únicamente campos y métodos generados por Lombok; no añadirles métodos de negocio, comparación ni fábricas estáticas. `ApplicationMatchingRules.matches(original, incoming)` realiza la comparación de reintentos. `CreditDecisionRules.isApproved` / `isRejected` comprueban el estado de una decisión. `CreditDecisionFactory.approved` / `rejected` y `ProcessingResultFactory.created` / `existing` construyen modelos mediante builders. Estas clases viven dentro del dominio y sus métodos son estáticos.
 
 `ProcessApplicationUseCase` implementa el procesamiento completo y recibe `CustomerPort`, `ApplicationPort`, `TransactionPort`, `ApplicationValidator` y `ApprovalRules`. Valida la entrada, resuelve referencias existentes y coordina bloqueo, lectura del total aprobado, evaluación e inserción dentro de la transacción. Recupera `DuplicateReferenceException` fuera de la transacción fallida para devolver el original o emitir `ReferenceConflictException`. `QueryApplicationsUseCase` recibe únicamente `ApplicationPort` como puerto de salida. `ApplicationValidator` se registra con `@Component`; `BusinessConfiguration` registra las reglas puras mediante `@Bean`, sin dependencias Spring en dominio.
 
@@ -48,7 +52,7 @@ Entrada: `applicationReference`, `customerId`, `amount` (`BigDecimal`), `termMon
 
 Aprobar únicamente con monto positivo, plazo entre 6 y 60 inclusive, cliente existente y habilitado, y total aprobado sin superar el cupo. Guardar aprobaciones y rechazos, motivo y fecha. Los rechazos no consumen cupo.
 
-`ApprovalRules.evaluate` implementa reglas puras. Para un cliente conocido, el orden de rechazo es monto, plazo, habilitación y cupo. Completar exactamente el cupo está permitido. `ApplicationValidator.validate` comprueba únicamente presencia e identificadores no blancos; monto cero/negativo y plazo fuera del rango llegan a las reglas y producen rechazos persistidos. `ApplicationData.matches` compara el monto mediante `compareTo` y conserva identificadores y datos sin normalización silenciosa. Las decisiones rechazadas conservan la descripción del motivo utilizada al evaluar.
+`ApprovalRules.evaluate` implementa reglas puras y construye las decisiones mediante `CreditDecisionFactory`. Para un cliente conocido, el orden de rechazo es monto, plazo, habilitación y cupo. Completar exactamente el cupo está permitido. `ApplicationValidator.validate` comprueba únicamente presencia e identificadores no blancos; monto cero/negativo y plazo fuera del rango llegan a las reglas y producen rechazos persistidos. `ApplicationMatchingRules.matches` compara el monto mediante `compareTo` y conserva identificadores y datos sin normalización silenciosa. Las decisiones rechazadas conservan la descripción del motivo utilizada al evaluar.
 
 Consultar primero la referencia. Si coincide cliente, valor numérico del monto y plazo, devolver el original sin reevaluar. Si cambian, 409 sin modificarlo. Esto también aplica al original rechazado.
 
@@ -66,7 +70,11 @@ Usar `onErrorMap` en adaptadores para traducir fallos conocidos y `onErrorResume
 
 ## HTTP y local
 
+Swagger implementado con `springdoc-openapi-starter-webflux-ui:3.1.1` para Spring Boot 4. `ApplicationRouter` documenta las tres rutas funcionales mediante `@RouterOperations` / `@RouterOperation`, con esquemas de DTO, estados HTTP y parámetros. `OpenApiConfiguration` contiene los metadatos de la API; los DTO HTTP usan `@Schema` para ejemplos y descripciones en español, sin validación automática. Acceder a `/swagger-ui.html`, `/v3/api-docs` o `/v3/api-docs.yaml`. Se verificaron Swagger UI, su configuración y la generación del documento por HTTP en una instancia temporal; no se enviaron solicitudes de crédito ni se ejecutaron pruebas automatizadas.
+
 Rutas: `POST /applications`, `GET /applications/{reference}`, `GET /applications?limit=20`. Nueva solicitud persistida: 201; repetición idéntica y consultas: 200; datos incompletos: 400; referencia consultada inexistente: 404; conflicto: 409; fallo técnico: 500.
+
+`ApplicationResponseDto.message` indica «Esta solicitud fue aprobada/rechazada» para nuevas solicitudes y consultas. En POST, el mapper recibe `ProcessingResult` y usa «Esta solicitud ya fue aprobada/rechazada» cuando `created` es falso. El mensaje es de presentación y no se guarda en la base. Los reintentos conservan los datos, el motivo y la fecha originales.
 
 Entrada HTTP implementada en `infrastructure/routerhandler`: `router/ApplicationRouter` registra las tres rutas mediante `RouterFunction`; `handler/ApplicationHandler` inyecta únicamente `ProcessApplicationPort` y `QueryApplicationsPort` y usa `ApplicationDtoMapper` estático. POST interpreta el request, convierte a dominio y selecciona 201 o 200 según `ProcessingResult.created`. GET por referencia devuelve el response DTO; el listado usa límite 20 por defecto y reúne los resultados antes de construir la respuesta JSON. Un cuerpo vacío, JSON ilegible o límite no interpretable como entero genera `ServerWebInputException`. La validación del rango 1–100 corresponde a aplicación.
 
