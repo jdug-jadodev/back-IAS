@@ -47,8 +47,6 @@ Persistencia implementada en `infrastructure/r2dbc`: entidades `CustomerEntity` 
 
 `R2dbcTransactionAdapter` implementa `TransactionPort` con `TransactionalOperator.execute` y `singleOrEmpty` para entregar el resultado después del commit. `PersistenceConfiguration` registra el gestor y el operador transaccional con `READ_COMMITTED` y la misma `ConnectionFactory`. `PersistenceErrorMapper` traduce fallos conocidos conservando la causa; solo la restricción `uq_credit_applications_idempotency_key` con SQLSTATE `23505` genera `DuplicateIdempotencyKeyException`. Una colisión inesperada de referencia es un fallo técnico. La base de ejecución se inicializa mediante los scripts del repositorio `compose-sistema-IAS`; el SQL en `src/test/resources` es exclusivamente para pruebas.
 
-Por solicitud del usuario, la conexión R2DBC de desarrollo está configurada temporalmente con URL y credenciales directas en `application.properties`, usando el usuario de aplicación y la base `DATABAE_IAS` expuesta por Docker en `localhost:5432`. Ejecutar con el perfil predeterminado; no se importa el `.env` de Compose. Más adelante se sustituirán las credenciales directas por variables de entorno. `spring.sql.init.mode=never`: el backend no ejecuta scripts de inicialización. Si el backend se ejecuta dentro de la red de Compose, la URL debe usar el host `postgres` y el puerto interno `5432`.
-
 ## Negocio y flujo
 
 Entrada: `customerId`, `amount` (`BigDecimal`), `termMonths` (`Integer`) y cabecera obligatoria `Idempotency-Key` UUID completo. La clave se normaliza a minúsculas; la referencia no forma parte del request. JSON ilegible: 400.
