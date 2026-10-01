@@ -1,6 +1,6 @@
 # Arquitectura del core de créditos
 
-**Estado:** flujo backend implementado para procesar y consultar solicitudes: modelos, puertos, DTO, mappers, validaciones, reglas, casos de uso, adaptadores R2DBC, router, handler y manejo global de errores. La base local se inicializa mediante los scripts de Compose. La verificación del nuevo flujo HTTP, de procesamiento y de concurrencia está pendiente por indicación del usuario.
+**Estado:** flujo backend implementado para procesar y consultar solicitudes: modelos, puertos, DTO, mappers, validaciones, reglas, casos de uso, adaptadores R2DBC, router, handler y manejo global de errores. La base local se inicializa mediante los scripts de Compose. Suite automatizada completa aprobada: 174 pruebas, incluidas 47 de flujos HTTP con PostgreSQL aislado, concurrencia, reintentos, rechazos y fallos transaccionales.
 
 **Base:** el enunciado exige procesar, conservar y consultar solicitudes, proteger el cupo ante concurrencia y conservar el resultado original ante referencias repetidas. También exige Java con WebFlux y Angular. [^prueba]
 
