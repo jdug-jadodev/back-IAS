@@ -37,3 +37,6 @@ out/
 .vscode/
 
 ENTIDADES.md
+
+.env
+.env.*
