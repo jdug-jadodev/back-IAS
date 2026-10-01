@@ -3,6 +3,7 @@ package com.backend_IAS.demo.domain.factory;
 import com.backend_IAS.demo.domain.entity.CreditDecision;
 import com.backend_IAS.demo.domain.enums.ApplicationStatus;
 import com.backend_IAS.demo.domain.enums.RejectionReason;
+import com.backend_IAS.demo.exception.message.DomainMessages;
 import java.util.Objects;
 
 public final class CreditDecisionFactory {
@@ -17,7 +18,7 @@ public final class CreditDecisionFactory {
     }
 
     public static CreditDecision rejected(RejectionReason reason) {
-        Objects.requireNonNull(reason, "reason is required");
+        Objects.requireNonNull(reason, DomainMessages.REASON_REQUIRED);
         return CreditDecision.builder()
                 .status(ApplicationStatus.REJECTED)
                 .reason(reason)

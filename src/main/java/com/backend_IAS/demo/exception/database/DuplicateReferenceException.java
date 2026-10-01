@@ -1,5 +1,6 @@
 package com.backend_IAS.demo.exception.database;
 
+import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import java.io.Serial;
 
 public class DuplicateReferenceException extends RuntimeException {
@@ -8,6 +9,6 @@ public class DuplicateReferenceException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     public DuplicateReferenceException(Throwable cause) {
-        super("Ya existe una solicitud con la referencia indicada", cause);
+        super(InfrastructureMessages.DUPLICATE_REFERENCE, cause);
     }
 }

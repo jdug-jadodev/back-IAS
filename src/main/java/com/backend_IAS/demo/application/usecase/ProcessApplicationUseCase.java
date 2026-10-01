@@ -24,6 +24,7 @@ import com.backend_IAS.demo.exception.application.CustomerNotFoundException;
 import com.backend_IAS.demo.exception.application.ReferenceConflictException;
 import com.backend_IAS.demo.exception.database.DuplicateReferenceException;
 import com.backend_IAS.demo.exception.database.PersistenceFailureException;
+import com.backend_IAS.demo.exception.message.InfrastructureMessages;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -80,7 +81,7 @@ public final class ProcessApplicationUseCase implements ProcessApplicationPort {
                 .switchIfEmpty(Mono.error(() -> new CustomerNotFoundException(data.getCustomerId())))
                 .flatMap(customer -> applicationPort.getTotalApproved(customer.getCustomerId())
                         .switchIfEmpty(Mono.error(() -> new PersistenceFailureException(
-                                new IllegalStateException("Approved total query did not return a value"))))
+                                new IllegalStateException(InfrastructureMessages.APPROVED_TOTAL_QUERY_EMPTY))))
                         .map(totalApproved -> CreditDecisionDtoMapper.toDto(approvalRules.evaluate(
                                 ApplicationDataDtoMapper.toDomain(data),
                                 CustomerDtoMapper.toDomain(customer), totalApproved)))
@@ -101,7 +102,7 @@ public final class ProcessApplicationUseCase implements ProcessApplicationPort {
         return applicationPort.insert(CreditApplicationDtoMapper.toDomain(application))
                 .map(CreditApplicationDtoMapper::toDto)
                 .switchIfEmpty(Mono.error(() -> new PersistenceFailureException(
-                        new IllegalStateException("Insertion did not return the persisted application"))))
+                        new IllegalStateException(InfrastructureMessages.APPLICATION_INSERT_EMPTY))))
                 .map(persisted -> ProcessingResultDto.builder()
                         .application(persisted)
                         .created(true)
