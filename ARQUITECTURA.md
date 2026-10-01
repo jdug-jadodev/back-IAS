@@ -19,48 +19,51 @@ La arquitectura interna, PostgreSQL, R2DBC, Docker, Lombok y las validaciones ma
 | Docker Compose para ejecución local | Definir frontend, backend y PostgreSQL como servicios separados; cola opcional. |
 | Frontend Angular con diseño atómico | Organizar componentes visuales reutilizables; la arquitectura hexagonal del frontend queda pendiente. |
 
+Convención: código, comentarios y pruebas en inglés; mensajes destinados al cliente en español.
+
 ## 2. Estructura del backend
 
 Carpetas dentro del paquete Java principal. Los nombres de clases son los propuestos para la implementación.
 
 ```text
-creditos/
-├── CreditosApplication.java
-├── dominio/
-│   ├── modelo/
-│   ├── regla/
-│   │   └── ReglasAprobacion.java
-│   └── puerto/
-│       ├── entrada/
-│       │   ├── ProcesarSolicitudPort.java
-│       │   └── ConsultarSolicitudesPort.java
-│       └── salida/
-│           ├── ClientePort.java
-│           ├── SolicitudPort.java
-│           └── TransaccionPort.java
-├── aplicacion/
-│   ├── casouso/
-│   │   ├── ProcesarSolicitudUseCase.java
-│   │   └── ConsultarSolicitudesUseCase.java
+com/backend_IAS/demo/
+├── DemoApplication.java
+├── domain/
+│   ├── entity/
+│   ├── enums/
+│   ├── rule/
+│   │   └── ApprovalRules.java
+│   └── port/
+│       ├── portin/
+│       │   ├── ProcessApplicationPort.java
+│       │   └── QueryApplicationsPort.java
+│       └── portout/
+│           ├── CustomerPort.java
+│           ├── ApplicationPort.java
+│           └── TransactionPort.java
+├── application/
+│   ├── usecase/
+│   │   ├── ProcessApplicationUseCase.java
+│   │   └── QueryApplicationsUseCase.java
 │   ├── dto/
 │   ├── mapper/
-│   └── validacion/
-├── infraestructura/
-│   ├── entrada/http/
-│   │   ├── SolicitudRouter.java
-│   │   ├── SolicitudHandler.java
+│   └── validation/
+├── infrastructure/
+│   ├── input/http/
+│   │   ├── ApplicationRouter.java
+│   │   ├── ApplicationHandler.java
 │   │   └── GlobalErrorHandler.java
-│   ├── salida/r2dbc/
-│   │   ├── adaptador/
-│   │   ├── entidad/
+│   ├── output/r2dbc/
+│   │   ├── adapter/
+│   │   ├── entity/
 │   │   ├── mapper/
 │   │   └── repository/
-│   ├── transaccion/
-│   │   └── R2dbcTransaccionAdapter.java
-│   └── configuracion/
-└── excepciones/
-    ├── aplicacion/
-    └── basedatos/
+│   ├── transaction/
+│   │   └── R2dbcTransactionAdapter.java
+│   └── configuration/
+└── exception/
+    ├── application/
+    └── database/
 ```
 
 No crear adaptadores vacíos para colas. Se incorporarán cuando exista esa integración.
@@ -73,15 +76,15 @@ Contiene modelos, reglas de aprobación y puertos de entrada y salida.
 
 | Modelo conceptual | Contenido |
 |---|---|
-| `DatosSolicitud` | `applicationReference`, `customerId`, `amount`, `termMonths`. Representa lo recibido, todavía sin aprobar. |
-| `Cliente` | Identificador, estado y cupo máximo. |
-| `DecisionCredito` | Aprobación o rechazo, con motivo cuando corresponda. |
-| `SolicitudCredito` | Datos de la solicitud, decisión y fecha de procesamiento. |
-| `ResultadoProcesamiento` | Solicitud procesada y un indicador `nueva`, para distinguir creación de repetición. |
+| `ApplicationData` | `applicationReference`, `customerId`, `amount`, `termMonths`. Representa lo recibido, todavía sin aprobar. |
+| `Customer` | Identificador, estado y cupo máximo. |
+| `CreditDecision` | Aprobación o rechazo, con motivo cuando corresponda. |
+| `CreditApplication` | Datos de la solicitud, decisión y fecha de procesamiento. |
+| `ProcessingResult` | Solicitud procesada y un indicador `created`, para distinguir creación de repetición. |
 
 Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para la fecha. Son modelos del negocio, **no entidades de base de datos**.
 
-`ReglasAprobacion` evalúa monto, plazo, habilitación y cupo con los datos que recibe. No consulta repositorios. `DatosSolicitud` debe permitir representar valores que luego producirán un rechazo; su constructor no debe descartarlos antes de evaluarlos.
+`ApprovalRules` evaluará monto, plazo, habilitación y cupo con los datos que reciba. Su implementación está pendiente. No consulta repositorios. `ApplicationData` debe permitir representar valores que luego producirán un rechazo; su constructor no debe descartarlos antes de evaluarlos.
 
 **No habrá dos grupos de casos de uso.** Las reglas puras quedan en dominio; la coordinación del proceso queda en aplicación.
 
@@ -89,19 +92,21 @@ Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para
 
 Los casos de uso implementan los puertos de entrada. Validan manualmente, consultan puertos de salida, ejecutan las reglas y solicitan el guardado.
 
-Aquí viven `SolicitudRequestDto`, `SolicitudResponseDto`, `ErrorResponseDto`, `SolicitudDtoMapper` y `SolicitudValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación.
+Aquí viven `ApplicationRequestDto`, `ApplicationResponseDto`, `ErrorResponseDto`, `ApplicationDtoMapper` y `ApplicationValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación.
 
-**Los puertos del dominio no reciben DTO de aplicación.** El handler usa `SolicitudDtoMapper` para convertir el DTO a `DatosSolicitud`; luego llama al puerto. Así dominio no necesita importar aplicación.
+Los mappers son totalmente manuales: métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto`. El monto del request es `BigDecimal`; en el response se devuelve como `String` mediante `toPlainString()`, sin redondearlo.
+
+**Los puertos del dominio no reciben DTO de aplicación.** El handler usa `ApplicationDtoMapper` para convertir el DTO a `ApplicationData`; luego llama al puerto. Así dominio no necesita importar aplicación.
 
 ### Infraestructura: conectar con tecnologías
 
 Contiene HTTP, adaptadores R2DBC, entidades de base de datos, sus mappers, configuración de dependencias y transacciones.
 
-Cada adaptador R2DBC implementa un puerto de salida e inyecta su repositorio técnico. Por ejemplo, `ClienteR2dbcAdapter` implementa `ClientePort` y usa `ClienteR2dbcRepository`.
+Cada adaptador R2DBC implementa un puerto de salida e inyecta su repositorio técnico. Por ejemplo, `CustomerR2dbcAdapter` implementa `CustomerPort` y usa `CustomerR2dbcRepository`.
 
 La interfaz técnica extiende **`R2dbcRepository` de Spring Data**, no el driver PostgreSQL. El driver se configura como parte de la conexión. [^repositorios]
 
-Los mappers de infraestructura convierten `ClienteEntity` y `SolicitudEntity` a modelos de dominio y viceversa. No validan reglas ni deciden aprobaciones.
+Los mappers de infraestructura convierten `CustomerEntity` y `ApplicationEntity` a modelos de dominio y viceversa. No validan reglas ni deciden aprobaciones.
 
 ### Excepciones: tipos compartidos, separados por origen
 
@@ -114,11 +119,11 @@ El adaptador interpreta el error técnico; aplicación decide las recuperaciones
 **Dependemos de contratos, no de implementaciones concretas de casos de uso o adaptadores.**
 
 ```text
-Router → Handler → ProcesarSolicitudPort
+Router → Handler → ProcessApplicationPort
                          ↑ implementa
-                ProcesarSolicitudUseCase
+                ProcessApplicationUseCase
                          ↓ usa
-             ClientePort / SolicitudPort
+             CustomerPort / ApplicationPort
                          ↑ implementan
                 Adaptadores R2DBC
                          ↓ usan
@@ -129,37 +134,37 @@ Router → Handler → ProcesarSolicitudPort
 
 | Contrato | Operaciones previstas | Implementación |
 |---|---|---|
-| `ProcesarSolicitudPort` | `procesar(DatosSolicitud)` → `Mono<ResultadoProcesamiento>` | `ProcesarSolicitudUseCase` |
-| `ConsultarSolicitudesPort` | `porReferencia(String)` → `Mono<SolicitudCredito>`; `recientes(int)` → `Flux<SolicitudCredito>` | `ConsultarSolicitudesUseCase` |
-| `ClientePort` | `obtenerConBloqueo(String)` → `Mono<Cliente>`; vacío si no existe | `ClienteR2dbcAdapter` |
-| `SolicitudPort` | Buscar por referencia, consultar total aprobado, insertar y listar recientes | `SolicitudR2dbcAdapter` |
-| `TransaccionPort` | Ejecutar una operación como una sola transacción | `R2dbcTransaccionAdapter` |
+| `ProcessApplicationPort` | `process(ApplicationData)` → `Mono<ProcessingResult>` | `ProcessApplicationUseCase` |
+| `QueryApplicationsPort` | `findByReference(String)` → `Mono<CreditApplication>`; `findRecent(int)` → `Flux<CreditApplication>` | `QueryApplicationsUseCase` |
+| `CustomerPort` | `findWithLock(String)` → `Mono<Customer>`; vacío si no existe | `CustomerR2dbcAdapter` |
+| `ApplicationPort` | `findByReference(String)`, `getTotalApproved(String)`, `insert(CreditApplication)` y `listRecent(int)` | `ApplicationR2dbcAdapter` |
+| `TransactionPort` | Ejecutar una operación como una sola transacción | `R2dbcTransactionAdapter` |
 
-`SolicitudPort` recibe y devuelve modelos de dominio o valores simples, nunca entidades R2DBC. `insertar` significa **crear sin sobrescribir**: no actualizar una solicitud existente.
+`ApplicationPort` recibe y devuelve modelos de dominio o valores simples, nunca entidades R2DBC. `insert` significa **crear sin sobrescribir**: no actualizar una solicitud existente.
 
-El handler inyecta los puertos de entrada y el mapper de DTO. No inyecta puertos de persistencia ni casos de uso concretos. Los casos de uso inyectan puertos de salida y sus colaboradores de reglas y validación.
+El handler inyecta los puertos de entrada y utiliza los métodos estáticos de `ApplicationDtoMapper`. No inyecta puertos de persistencia ni casos de uso concretos. Los casos de uso inyectan puertos de salida y sus colaboradores de reglas y validación.
 
 Otro caso de uso puede llamar un puerto de entrada cuando realmente necesite esa operación completa, sin ciclos entre casos de uso. No crear esa dependencia solo para reutilizar una validación.
 
-La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. `infraestructura/configuracion` construye los casos de uso mediante `@Bean` y los expone por su interfaz. Las pruebas y esta configuración sí pueden conocer las implementaciones.
+La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. `infrastructure/configuration` construye los casos de uso mediante `@Bean` y los expone por su interfaz. Las pruebas y esta configuración sí pueden conocer las implementaciones.
 
-**Límites:** dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura ni Spring. Infraestructura puede importar las capas internas. El paquete `excepciones` no depende de ellas. Se acepta Reactor en los puertos y en aplicación; los modelos y las reglas no necesitan Reactor.
+**Límites:** dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura ni Spring. Infraestructura puede importar las capas internas. El paquete `exception` no depende de ellas. Se acepta Reactor en los puertos y en aplicación; los modelos y las reglas no necesitan Reactor.
 
 ## 5. Transacción y recorrido de una solicitud
 
 Aplicación decide **qué operaciones deben ir juntas**; infraestructura sabe **cómo ejecutar la transacción**.
 
-Contrato de `TransaccionPort`:
+Contrato de `TransactionPort`:
 
 ```java
-<T> Mono<T> ejecutar(Supplier<Mono<T>> operacion);
+<T> Mono<T> execute(Supplier<Mono<T>> operation);
 ```
 
-El adaptador usa `TransactionalOperator` sobre el `Mono` creado con `Mono.defer(operacion)`. La configuración usa `R2dbcTransactionManager`, la misma `ConnectionFactory` de los repositorios y aislamiento `READ_COMMITTED`. No poner `TransactionalOperator` ni `@Transactional` en los casos de uso. [^transacciones]
+El adaptador usa `TransactionalOperator` sobre el `Mono` creado con `Mono.defer(operation)`. La configuración usa `R2dbcTransactionManager`, la misma `ConnectionFactory` de los repositorios y aislamiento `READ_COMMITTED`. No poner `TransactionalOperator` ni `@Transactional` en los casos de uso. [^transacciones]
 
 ### Camino principal
 
-1. El handler interpreta el JSON, lo convierte a `DatosSolicitud` y llama al puerto de entrada.
+1. El handler interpreta el JSON, lo convierte a `ApplicationData` y llama al puerto de entrada.
 2. Aplicación valida que estén presentes la referencia, el cliente, el monto y el plazo. Referencia y cliente no pueden estar en blanco.
 3. Busca la referencia: si ya existe, compara cliente, monto y plazo. Devuelve el original si coinciden; informa conflicto si cambian. No vuelve a evaluar.
 4. Para una referencia nueva, abre la transacción y obtiene el cliente con bloqueo. Después consulta el total aprobado, en una consulta separada.
@@ -174,7 +179,7 @@ El cupo consumido corresponde a la suma de montos aprobados. Los rechazos no lo 
 
 PostgreSQL debe imponer una referencia única; una consulta previa no reemplaza esa protección. [^unicidad]
 
-Cuando la inserción pierda esa carrera, el adaptador emite `ReferenciaDuplicadaException`. La aplicación la recupera **fuera de la transacción fallida, después de su reversión**: consulta el original y compara sus datos. No consulta dentro de una transacción abortada ni modifica el original.
+Cuando la inserción pierda esa carrera, el adaptador emite `DuplicateReferenceException`. La aplicación la recupera **fuera de la transacción fallida, después de su reversión**: consulta el original y compara sus datos. No consulta dentro de una transacción abortada ni modifica el original.
 
 La comparación del monto es numérica: `6000000` y `6000000.00` representan el mismo valor. También se conserva el resultado original cuando fue un rechazo.
 
@@ -187,15 +192,15 @@ La comparación del monto es numérica: `6000000` y `6000000.00` representan el 
 | Situación | Tratamiento definido |
 |---|---|
 | JSON ilegible o tipos incompatibles | Error HTTP 400 en la entrada; no se procesa una solicitud. |
-| Campos obligatorios ausentes o referencia/cliente en blanco | `DatosSolicitudInvalidosException` en aplicación; HTTP 400. |
-| Cliente inexistente durante el procesamiento | `ClienteNoExisteException` en aplicación; se transforma en rechazo y se guarda. |
-| Monto no positivo, plazo fuera de 6–60, cliente bloqueado o cupo insuficiente | `DecisionCredito` rechazada con motivo; se guarda, sin consumir cupo. |
-| Referencia existente con datos diferentes | `ReferenciaEnConflictoException`; HTTP 409, original intacto. |
-| Consulta por referencia inexistente | `SolicitudNoEncontradaException`; HTTP 404. |
-| Colisión al insertar la misma referencia | `ReferenciaDuplicadaException` en persistencia; recuperación indicada en sección 5. |
-| Fallo de acceso o de transacción | `FalloPersistenciaException`; HTTP 500 con mensaje público genérico. Nunca convertirlo en rechazo de crédito. |
+| Campos obligatorios ausentes o referencia/cliente en blanco | `InvalidApplicationDataException` en aplicación; HTTP 400. |
+| Cliente inexistente durante el procesamiento | `CustomerNotFoundException` en aplicación; se transforma en rechazo y se guarda. |
+| Monto no positivo, plazo fuera de 6–60, cliente bloqueado o cupo insuficiente | `CreditDecision` rechazada con motivo; se guarda, sin consumir cupo. |
+| Referencia existente con datos diferentes | `ReferenceConflictException`; HTTP 409, original intacto. |
+| Consulta por referencia inexistente | `ApplicationNotFoundException`; HTTP 404. |
+| Colisión al insertar la misma referencia | `DuplicateReferenceException` en persistencia; recuperación indicada en sección 5. |
+| Fallo de acceso o de transacción | `PersistenceFailureException`; HTTP 500 con mensaje público genérico. Nunca convertirlo en rechazo de crédito. |
 
-`ClienteNoExisteException` se captura dentro de la operación de aplicación, antes de finalizar la transacción, para construir e insertar el rechazo. Una consulta vacía no es una caída de la base de datos. Esta excepción no debe llegar al manejador HTTP como un 404. La persistencia deberá permitir conservar el `customerId` recibido aunque ese cliente no exista.
+`CustomerNotFoundException` se captura dentro de la operación de aplicación, antes de finalizar la transacción, para construir e insertar el rechazo. Una consulta vacía no es una caída de la base de datos. Esta excepción no debe llegar al manejador HTTP como un 404. La persistencia deberá permitir conservar el `customerId` recibido aunque ese cliente no exista.
 
 El dominio devuelve motivos estables, por ejemplo `INVALID_AMOUNT`, `INVALID_TERM`, `CUSTOMER_BLOCKED` e `INSUFFICIENT_LIMIT`. El rechazo por ausencia de cliente usa `CUSTOMER_NOT_FOUND`.
 

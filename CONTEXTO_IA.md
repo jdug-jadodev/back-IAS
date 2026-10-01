@@ -6,23 +6,29 @@ Especificación resumida. `ARQUITECTURA.md` contiene las decisiones completas y 
 
 Backend único: Java, Spring Boot WebFlux, router y handler, Spring Data R2DBC, PostgreSQL y `TransactionalOperator`. Clases con Lombok; sin `record`, `@Valid`, validaciones automáticas de DTO, JPA ni controladores anotados. Validar manualmente.
 
+Código en inglés: clases, interfaces, métodos, campos, enums, paquetes, comentarios y pruebas. Solo los mensajes destinados al cliente se escriben en español. Conservar la estructura actual de puertos `domain/port/portin` y `domain/port/portout`.
+
+Mappers totalmente manuales, con métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto`. Request: `amount` como `BigDecimal`; response: texto decimal mediante `toPlainString()`, sin redondeo ni conversión a `double`.
+
+Los campos de los DTO de request y response declaran explícitamente su nombre JSON mediante `@JsonProperty`.
+
 ## Paquetes
 
 | Paquete | Contenido |
 |---|---|
-| `dominio` | Modelos, `ReglasAprobacion`, `puerto/entrada`, `puerto/salida`. |
-| `aplicacion` | Casos de uso, DTO, mappers DTO-dominio, validadores manuales. |
-| `infraestructura` | Router, handler, manejador HTTP de errores, adaptadores R2DBC, entidades de base, sus mappers, repositorios técnicos, transacciones y configuración. |
-| `excepciones/aplicacion` | Datos inválidos, cliente inexistente, referencia en conflicto, solicitud no encontrada. |
-| `excepciones/basedatos` | `ReferenciaDuplicadaException`, `FalloPersistenciaException`; tipos propios sin dependencias de Spring o PostgreSQL. |
+| `domain` | Modelos, `ApprovalRules`, `port/portin`, `port/portout`. |
+| `application` | Casos de uso, DTO, mappers DTO-dominio, validadores manuales. |
+| `infrastructure` | Router, handler, manejador HTTP de errores, adaptadores R2DBC, entidades de base, sus mappers, repositorios técnicos, transacciones y configuración. |
+| `exception/application` | Datos inválidos, cliente inexistente, referencia en conflicto, solicitud no encontrada. |
+| `exception/database` | `DuplicateReferenceException`, `PersistenceFailureException`; tipos propios sin dependencias de Spring o PostgreSQL. |
 
 ## Contratos
 
-El handler inyecta `ProcesarSolicitudPort` y `ConsultarSolicitudesPort`, implementados por los casos de uso. Nunca inyecta casos de uso concretos ni repositorios.
+El handler inyecta `ProcessApplicationPort` y `QueryApplicationsPort`, implementados por los casos de uso. Nunca inyecta casos de uso concretos ni repositorios.
 
-Los casos de uso inyectan `ClientePort`, `SolicitudPort` y `TransaccionPort`. Los adaptadores implementan esos puertos de salida. Cada adaptador R2DBC inyecta su repositorio, cuya interfaz extiende `R2dbcRepository`, no el driver.
+Los casos de uso inyectan `CustomerPort`, `ApplicationPort` y `TransactionPort`. Los adaptadores implementan esos puertos de salida. Cada adaptador R2DBC inyecta su repositorio, cuya interfaz extiende `R2dbcRepository`, no el driver.
 
-Los puertos reciben modelos de dominio, nunca DTO de aplicación ni entidades R2DBC. El handler convierte DTO a `DatosSolicitud` mediante el mapper de aplicación. Infraestructura convierte entidades de base a dominio.
+Los puertos reciben modelos de dominio, nunca DTO de aplicación ni entidades R2DBC. El handler convierte DTO a `ApplicationData` mediante el mapper de aplicación. Infraestructura convierte entidades de base a dominio.
 
 Dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura ni Spring. Excepciones propias dependen solo de Java. Reactor se permite en puertos y aplicación. Configurar casos de uso con `@Bean` en infraestructura; inyección por constructor. No crear ciclos entre casos de uso.
 
@@ -38,11 +44,11 @@ Para una nueva referencia: abrir transacción, bloquear el cliente, consultar de
 
 ## Transacciones y errores
 
-`TransaccionPort`: `<T> Mono<T> ejecutar(Supplier<Mono<T>> operacion)`. Su adaptador usa `TransactionalOperator` con `Mono.defer`, `R2dbcTransactionManager`, la misma `ConnectionFactory` de los repositorios y `READ_COMMITTED`. Aplicación no importa `TransactionalOperator`.
+`TransactionPort`: `<T> Mono<T> execute(Supplier<Mono<T>> operation)`. Su adaptador usa `TransactionalOperator` con `Mono.defer`, `R2dbcTransactionManager`, la misma `ConnectionFactory` de los repositorios y `READ_COMMITTED`. Aplicación no importa `TransactionalOperator`.
 
 Bloqueo por cliente: `SELECT ... FOR UPDATE`. Referencia única en PostgreSQL. Si una inserción pierde por duplicidad, revertir; recuperar fuera de esa transacción consultando el original y comparándolo. Identificar específicamente la restricción de referencia.
 
-Cliente inexistente: aplicación genera `ClienteNoExisteException`, la recupera dentro de la operación y guarda un rechazo `CUSTOMER_NOT_FOUND`; no responde 404. La persistencia debe permitir conservar ese identificador inexistente.
+Cliente inexistente: aplicación genera `CustomerNotFoundException`, la recupera dentro de la operación y guarda un rechazo `CUSTOMER_NOT_FOUND`; no responde 404. La persistencia debe permitir conservar ese identificador inexistente.
 
 Usar `onErrorMap` en adaptadores para traducir fallos conocidos y `onErrorResume` para recuperaciones específicas. Una caída de base nunca significa rechazo de crédito. `GlobalErrorHandler` implementa `WebExceptionHandler`: mensaje público seguro y registro técnico único. No usar `.block()`, `.subscribe()` manual, recuperaciones genéricas que oculten errores ni operaciones paralelas dentro de la transacción.
 
