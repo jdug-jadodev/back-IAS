@@ -10,7 +10,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @RequiredArgsConstructor
-public final class R2dbcTransactionAdapter implements TransactionPort {
+public class R2dbcTransactionAdapter implements TransactionPort {
 
     private final TransactionalOperator transactionalOperator;
 
