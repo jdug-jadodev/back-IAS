@@ -1,6 +1,6 @@
 # Arquitectura del core de créditos
 
-**Estado:** implementación parcial. Existen modelos, puertos, DTO, mappers, consultas de aplicación y adaptadores R2DBC. El procesamiento del crédito, las reglas, las migraciones y la configuración de ejecución local siguen pendientes.
+**Estado:** flujo backend implementado para procesar y consultar solicitudes: modelos, puertos, DTO, mappers, validaciones, reglas, casos de uso, adaptadores R2DBC, router, handler y manejo global de errores. La base local se inicializa mediante los scripts de Compose. La verificación del nuevo flujo HTTP, de procesamiento y de concurrencia está pendiente por indicación del usuario.
 
 **Base:** el enunciado exige procesar, conservar y consultar solicitudes, proteger el cupo ante concurrencia y conservar el resultado original ante referencias repetidas. También exige Java con WebFlux y Angular. [^prueba]
 
@@ -84,7 +84,7 @@ Contiene modelos, reglas de aprobación y puertos de entrada y salida.
 
 Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para la fecha. Son modelos del negocio, **no entidades de base de datos**.
 
-`ApprovalRules` evaluará monto, plazo, habilitación y cupo con los datos que reciba. Su implementación está pendiente. No consulta repositorios. `ApplicationData` debe permitir representar valores que luego producirán un rechazo; su constructor no debe descartarlos antes de evaluarlos.
+`ApprovalRules` evalúa monto, plazo, habilitación y cupo con los datos que recibe, en ese orden para clientes conocidos. No consulta repositorios ni depende de Spring. `BusinessConfiguration` la registra como bean. `ApplicationData` permite representar valores que luego producirán un rechazo; su constructor no los descarta antes de evaluarlos. Su método `matches` realiza la comparación numérica del monto para reintentos.
 
 **No habrá dos grupos de casos de uso.** Las reglas puras quedan en dominio; la coordinación del proceso queda en aplicación.
 
@@ -95,6 +95,8 @@ Los casos de uso implementan los puertos de entrada. Validan manualmente, consul
 Aquí viven `ApplicationRequestDto`, `ApplicationResponseDto`, `ErrorResponseDto`, `ApplicationDtoMapper` y `ApplicationValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación.
 
 Estado actual de consultas: `QueryApplicationsUseCase` implementa `QueryApplicationsPort`, valida mediante `ApplicationValidator` y consulta `ApplicationPort`. La referencia debe estar presente y no estar en blanco; el límite debe estar entre 1 y 100. Si la búsqueda queda vacía, emite `ApplicationNotFoundException`. Los datos inválidos generan `InvalidApplicationDataException` y los fallos técnicos se propagan. La validación y el acceso al puerto se difieren hasta la suscripción.
+
+Estado actual de procesamiento: `ProcessApplicationUseCase` implementa `ProcessApplicationPort`, valida los cuatro campos y resuelve el reintento antes de abrir la transacción. Para solicitudes nuevas bloquea al cliente, consulta el total aprobado en otra operación, evalúa e inserta. Captura la ausencia de cliente dentro de la transacción para guardar `CUSTOMER_NOT_FOUND`. Recupera la referencia duplicada fuera de la transacción revertida. El resultado llega al handler después de confirmar.
 
 Los mappers son totalmente manuales: métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto`. El monto del request es `BigDecimal`; en el response se devuelve como `String` mediante `toPlainString()`, sin redondearlo.
 
@@ -110,7 +112,7 @@ La interfaz técnica extiende **`R2dbcRepository` de Spring Data**, no el driver
 
 Los mappers de infraestructura convierten `CustomerEntity` y `ApplicationEntity` a modelos de dominio y viceversa. No validan reglas ni deciden aprobaciones.
 
-Adaptadores implementados en `infrastructure/output/r2dbc`: `CustomerR2dbcAdapter` obtiene al cliente mediante `SELECT ... FOR UPDATE`; `ApplicationR2dbcAdapter` consulta referencias, suma únicamente aprobaciones, inserta mediante `INSERT ... RETURNING` y lista por `processed_at DESC, id DESC`. Los repositorios extienden `R2dbcRepository`. La inserción no utiliza `save` ni sobrescribe resultados anteriores.
+Adaptadores implementados en `infrastructure/r2dbc`: `CustomerR2dbcAdapter` obtiene al cliente mediante `SELECT ... FOR UPDATE`; `ApplicationR2dbcAdapter` consulta referencias, suma únicamente aprobaciones, inserta mediante `INSERT ... RETURNING` y lista por `processed_at DESC, id DESC`. Los repositorios extienden `R2dbcRepository`. La inserción no utiliza `save` ni sobrescribe resultados anteriores. El adaptador de transacciones vive en `infrastructure/r2dbc/adapter/transaction`.
 
 `ApplicationData.customerId` conserva el identificador recibido; `CreditApplication.identifiedCustomerId` conserva el vínculo opcional con el cliente conocido. `CreditDecision.reasonDescription` conserva el mensaje histórico. El mapper mapea esos datos explícitamente y la respuesta utiliza el mensaje persistido cuando existe. La fecha definitiva se obtiene de PostgreSQL mediante `RETURNING` y se convierte de `OffsetDateTime` a `Instant`.
 
@@ -154,7 +156,7 @@ El handler inyecta los puertos de entrada y utiliza los métodos estáticos de `
 
 Otro caso de uso puede llamar un puerto de entrada cuando realmente necesite esa operación completa, sin ciclos entre casos de uso. No crear esa dependencia solo para reutilizar una validación.
 
-La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. Por decisión posterior del proyecto, los casos de uso se registran mediante `@Service` y se inyectan por su interfaz. `ProcessApplicationUseCase` recibe `CustomerPort`, `ApplicationPort` y `TransactionPort`; `QueryApplicationsUseCase` recibe `ApplicationPort` y `ApplicationValidator`. `infrastructure/configuration` registra el validador y la configuración transaccional mediante `@Bean`.
+La inyección se hace por constructor, con dependencias `final`; puede usarse `@RequiredArgsConstructor`. Por decisión posterior del proyecto, los casos de uso se registran mediante `@Service` y se inyectan por su interfaz. `ProcessApplicationUseCase` recibe `CustomerPort`, `ApplicationPort`, `TransactionPort`, `ApplicationValidator` y `ApprovalRules`; `QueryApplicationsUseCase` recibe `ApplicationPort` y `ApplicationValidator`. El validador se registra con `@Component`. `infrastructure/configuration` registra las reglas puras y la configuración transaccional mediante `@Bean`.
 
 **Límites:** dominio no importa aplicación ni infraestructura. Aplicación no importa infraestructura; se permite `@Service` para registrar casos de uso, pero no APIs de persistencia o transacciones de Spring. Infraestructura puede importar las capas internas. El paquete `exception` no depende de ellas. Se acepta Reactor en los puertos y en aplicación; los modelos y las reglas no necesitan Reactor.
 
@@ -219,6 +221,8 @@ En los adaptadores, usar `onErrorMap` para traducir errores técnicos conocidos.
 No traducir cualquier restricción violada como referencia duplicada: comprobar que sea la restricción de referencia. No envolver una excepción propia de nuevo como fallo genérico.
 
 `GlobalErrorHandler`, en infraestructura HTTP, implementa `WebExceptionHandler` y centraliza la respuesta de error. [^erroresweb] Responde con `code`, `message` y `traceId`. Registra una vez los fallos técnicos con su causa y correlación; no expone SQL, credenciales ni trazas al navegador.
+
+Implementación actual en `infrastructure/routerhandler/error`, con `@Order(-2)` y serialización mediante el `ObjectMapper` de Jackson 3 de Spring Boot. `ErrorResponseDto` usa builder y `@JsonProperty`; los mensajes públicos están en español y la cabecera `X-Trace-Id` contiene la misma correlación del cuerpo. Los errores HTTP de lectura y transporte mantienen sus estados; los errores propios se traducen a 400, 404, 409 o 500 según su origen.
 
 ### API prevista
 
