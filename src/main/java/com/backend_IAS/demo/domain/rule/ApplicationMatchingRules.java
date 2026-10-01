@@ -1,0 +1,22 @@
+package com.backend_IAS.demo.domain.rule;
+
+import com.backend_IAS.demo.domain.entity.ApplicationData;
+import com.backend_IAS.demo.exception.message.DomainMessages;
+import java.util.Objects;
+
+public final class ApplicationMatchingRules {
+
+    private ApplicationMatchingRules() {
+    }
+
+    public static boolean matches(ApplicationData original, ApplicationData other) {
+        Objects.requireNonNull(original, DomainMessages.ORIGINAL_REQUIRED);
+        return other != null
+                && Objects.equals(original.getIdempotencyKey(), other.getIdempotencyKey())
+                && Objects.equals(original.getCustomerId(), other.getCustomerId())
+                && original.getAmount() != null
+                && other.getAmount() != null
+                && original.getAmount().compareTo(other.getAmount()) == 0
+                && Objects.equals(original.getTermMonths(), other.getTermMonths());
+    }
+}
