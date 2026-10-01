@@ -31,8 +31,13 @@ com/backend_IAS/demo/
 ├── domain/
 │   ├── entity/
 │   ├── enums/
+│   ├── factory/
+│   │   ├── CreditDecisionFactory.java
+│   │   └── ProcessingResultFactory.java
 │   ├── rule/
-│   │   └── ApprovalRules.java
+│   │   ├── ApprovalRules.java
+│   │   ├── ApplicationMatchingRules.java
+│   │   └── CreditDecisionRules.java
 │   └── port/
 │       ├── portin/
 │       │   ├── ProcessApplicationPort.java
@@ -72,7 +77,7 @@ No crear adaptadores vacíos para colas. Se incorporarán cuando exista esa inte
 
 ### Dominio: datos y reglas del crédito
 
-Contiene modelos, reglas de aprobación y puertos de entrada y salida.
+Contiene modelos, fábricas, reglas de aprobación y puertos de entrada y salida.
 
 | Modelo conceptual | Contenido |
 |---|---|
@@ -84,7 +89,9 @@ Contiene modelos, reglas de aprobación y puertos de entrada y salida.
 
 Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para la fecha. Son modelos del negocio, **no entidades de base de datos**.
 
-`ApprovalRules` evalúa monto, plazo, habilitación y cupo con los datos que recibe, en ese orden para clientes conocidos. No consulta repositorios ni depende de Spring. `BusinessConfiguration` la registra como bean. `ApplicationData` permite representar valores que luego producirán un rechazo; su constructor no los descarta antes de evaluarlos. Su método `matches` realiza la comparación numérica del monto para reintentos.
+`ApprovalRules` evalúa monto, plazo, habilitación y cupo con los datos que recibe, en ese orden para clientes conocidos. No consulta repositorios ni depende de Spring. `BusinessConfiguration` la registra como bean. `ApplicationData` permite representar valores que luego producirán un rechazo; su constructor no los descarta antes de evaluarlos. `ApplicationMatchingRules.matches(original, incoming)` realiza la comparación numérica del monto para reintentos.
+
+Las entidades de dominio son contenedores de datos con Lombok: no contienen métodos de negocio, comparación ni fábricas estáticas. La construcción de decisiones y resultados vive en `domain/factory/CreditDecisionFactory` y `ProcessingResultFactory`, con métodos estáticos y builders. `domain/rule/CreditDecisionRules` contiene las comprobaciones `isApproved` / `isRejected`. La lógica extraída conserva su comportamiento y se utiliza desde las reglas y los casos de uso.
 
 **No habrá dos grupos de casos de uso.** Las reglas puras quedan en dominio; la coordinación del proceso queda en aplicación.
 
@@ -92,19 +99,23 @@ Usar `BigDecimal` para montos, `Integer` para el plazo recibido e `Instant` para
 
 Los casos de uso implementan los puertos de entrada. Validan manualmente, consultan puertos de salida, ejecutan las reglas y solicitan el guardado.
 
-Aquí viven `ApplicationRequestDto`, `ApplicationResponseDto`, `ErrorResponseDto`, `ApplicationDtoMapper` y `ApplicationValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación.
+Aquí viven los DTO HTTP (`ApplicationRequestDto`, `ApplicationResponseDto`, `ErrorResponseDto`), los DTO internos (`ApplicationDataDto`, `CustomerDto`, `CreditDecisionDto`, `CreditApplicationDto`, `ProcessingResultDto`), sus mappers y `ApplicationValidator`. Los DTO son contenedores de datos, sin validaciones automáticas ni lógica de aprobación. `ApplicationValidator.validate` recibe `ApplicationDataDto`.
+
+Por decisión del usuario, la coordinación interna de aplicación trabaja únicamente con DTO. Las entidades de dominio aparecen en las firmas exigidas por los puertos y en los mappers. Al entrar a un caso de uso o recibir datos de un puerto, convertir a DTO antes de trabajar con ellos; al invocar un puerto o una regla de dominio, convertir a dominio; al devolver el resultado del caso de uso, convertir nuevamente a dominio. No construir entidades directamente en los casos de uso ni mantenerlas en DTO como campos anidados.
 
 Estado actual de consultas: `QueryApplicationsUseCase` implementa `QueryApplicationsPort`, valida mediante `ApplicationValidator` y consulta `ApplicationPort`. La referencia debe estar presente y no estar en blanco; el límite debe estar entre 1 y 100. Si la búsqueda queda vacía, emite `ApplicationNotFoundException`. Los datos inválidos generan `InvalidApplicationDataException` y los fallos técnicos se propagan. La validación y el acceso al puerto se difieren hasta la suscripción.
 
 Estado actual de procesamiento: `ProcessApplicationUseCase` implementa `ProcessApplicationPort`, valida los cuatro campos y resuelve el reintento antes de abrir la transacción. Para solicitudes nuevas bloquea al cliente, consulta el total aprobado en otra operación, evalúa e inserta. Captura la ausencia de cliente dentro de la transacción para guardar `CUSTOMER_NOT_FOUND`. Recupera la referencia duplicada fuera de la transacción revertida. El resultado llega al handler después de confirmar.
 
-Los mappers son totalmente manuales: métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto`. El monto del request es `BigDecimal`; en el response se devuelve como `String` mediante `toPlainString()`, sin redondearlo.
+Los mappers son totalmente manuales: métodos estáticos y construcción mediante builders. `ApplicationDtoMapper.toDomain(ApplicationRequestDto)` convierte a `ApplicationData`; `toResponse(CreditApplication)` construye `ApplicationResponseDto` pasando primero por el DTO interno. `ApplicationDataDtoMapper`, `CustomerDtoMapper`, `CreditDecisionDtoMapper`, `CreditApplicationDtoMapper` y `ProcessingResultDtoMapper` proporcionan conversiones `toDto` / `toDomain`. Conservan explícitamente todos los datos, incluida la escala de `BigDecimal`, `identifiedCustomerId`, `reasonDescription`, `processedAt` y `created`. El monto del request y de los DTO internos es `BigDecimal`; en el response HTTP se devuelve como `String` mediante `toPlainString()`, sin redondearlo.
 
 **Los puertos del dominio no reciben DTO de aplicación.** El handler usa `ApplicationDtoMapper` para convertir el DTO a `ApplicationData`; luego llama al puerto. Así dominio no necesita importar aplicación.
 
 ### Infraestructura: conectar con tecnologías
 
 Contiene HTTP, adaptadores R2DBC, entidades de base de datos, sus mappers, configuración de dependencias y transacciones.
+
+Swagger UI se integra con `springdoc-openapi-starter-webflux-ui:3.1.1`, compatible con Spring Boot 4. Las tres rutas funcionales se documentan en `ApplicationRouter` mediante `@RouterOperations` / `@RouterOperation`, asociadas a sus métodos del handler. Se describen request, respuestas, reintentos, rechazos persistidos y parámetros de consulta. Los DTO HTTP añaden `@Schema` únicamente como documentación, sin validación automática. `OpenApiConfiguration` define título, versión y etiqueta. Accesos locales: `/swagger-ui.html`, `/v3/api-docs` y `/v3/api-docs.yaml`. Swagger UI y el documento generado se verificaron por HTTP en una instancia temporal, sin enviar solicitudes de crédito ni ejecutar pruebas automatizadas.
 
 Cada adaptador R2DBC implementa un puerto de salida e inyecta su repositorio técnico. Por ejemplo, `CustomerR2dbcAdapter` implementa `CustomerPort` y usa `CustomerR2dbcRepository`.
 
@@ -234,7 +245,7 @@ GET  /applications?limit=20
 
 Una solicitud nueva persistida devuelve **201**, aprobada o rechazada. Una repetición idéntica devuelve **200**, con el resultado original. Las consultas exitosas devuelven **200**. El handler elige el estado HTTP; dominio no contiene códigos HTTP.
 
-La respuesta de solicitud incluye los cuatro datos de entrada, `status`, `processedAt` y, para rechazos, `reasonCode` y `reason`. Usar `APPROVED` y `REJECTED` como estados. El límite de recientes será 20 por defecto, con rango permitido de 1 a 100 y orden del más reciente al más antiguo; validar ese parámetro manualmente.
+La respuesta de solicitud incluye los cuatro datos de entrada, `status`, `message`, `processedAt` y, para rechazos, `reasonCode` y `reason`. Usar `APPROVED` y `REJECTED` como estados. `ApplicationDtoMapper.toResponse(ProcessingResult)` añade el mensaje de POST: «Esta solicitud fue aprobada/rechazada» para solicitudes nuevas y «Esta solicitud ya fue aprobada/rechazada» para reintentos idénticos. Las consultas muestran «Esta solicitud fue aprobada/rechazada». El mensaje se construye al responder, sin persistirlo ni modificar la decisión original. El límite de recientes será 20 por defecto, con rango permitido de 1 a 100 y orden del más reciente al más antiguo; validar ese parámetro manualmente.
 
 ## 7. Docker y frontend
 

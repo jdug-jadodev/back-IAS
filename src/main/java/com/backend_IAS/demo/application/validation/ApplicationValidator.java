@@ -1,6 +1,6 @@
 package com.backend_IAS.demo.application.validation;
 
-import com.backend_IAS.demo.domain.entity.ApplicationData;
+import com.backend_IAS.demo.application.dto.ApplicationDataDto;
 import com.backend_IAS.demo.exception.application.InvalidApplicationDataException;
 import org.springframework.stereotype.Component;
 
@@ -10,7 +10,7 @@ public final class ApplicationValidator {
     private static final int MIN_RECENT_LIMIT = 1;
     private static final int MAX_RECENT_LIMIT = 100;
 
-    public void validate(ApplicationData data) {
+    public void validate(ApplicationDataDto data) {
         if (data == null) {
             throw new InvalidApplicationDataException("Los datos de la solicitud son obligatorios");
         }

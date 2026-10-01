@@ -5,6 +5,7 @@ import com.backend_IAS.demo.domain.entity.CreditDecision;
 import com.backend_IAS.demo.domain.entity.Customer;
 import com.backend_IAS.demo.domain.enums.CustomerStatus;
 import com.backend_IAS.demo.domain.enums.RejectionReason;
+import com.backend_IAS.demo.domain.factory.CreditDecisionFactory;
 import java.math.BigDecimal;
 import java.util.Objects;
 
@@ -29,17 +30,17 @@ public final class ApprovalRules {
             throw new IllegalArgumentException("Approved total and credit limit must not be negative");
         }
         if (amount.signum() <= 0) {
-            return CreditDecision.rejected(RejectionReason.INVALID_AMOUNT);
+            return CreditDecisionFactory.rejected(RejectionReason.INVALID_AMOUNT);
         }
         if (termMonths < MIN_TERM_MONTHS || termMonths > MAX_TERM_MONTHS) {
-            return CreditDecision.rejected(RejectionReason.INVALID_TERM);
+            return CreditDecisionFactory.rejected(RejectionReason.INVALID_TERM);
         }
         if (status != CustomerStatus.ELIGIBLE) {
-            return CreditDecision.rejected(RejectionReason.CUSTOMER_BLOCKED);
+            return CreditDecisionFactory.rejected(RejectionReason.CUSTOMER_BLOCKED);
         }
         if (totalApproved.add(amount).compareTo(creditLimit) > 0) {
-            return CreditDecision.rejected(RejectionReason.INSUFFICIENT_LIMIT);
+            return CreditDecisionFactory.rejected(RejectionReason.INSUFFICIENT_LIMIT);
         }
-        return CreditDecision.approved();
+        return CreditDecisionFactory.approved();
     }
 }

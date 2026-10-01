@@ -33,7 +33,7 @@ public class ApplicationHandler {
                 .flatMap(result -> ServerResponse
                         .status(result.isCreated() ? HttpStatus.CREATED : HttpStatus.OK)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .bodyValue(ApplicationDtoMapper.toResponse(result.getApplication())));
+                        .bodyValue(ApplicationDtoMapper.toResponse(result)));
     }
 
     public Mono<ServerResponse> findByReference(ServerRequest request) {

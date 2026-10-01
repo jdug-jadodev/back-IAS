@@ -29,7 +29,7 @@ class QueryApplicationsUseCaseTest {
             new QueryApplicationsUseCase(applicationPort, new ApplicationValidator());
 
     @Test
-    void shouldQueryReferenceOnlyOnSubscriptionAndReturnOriginalApplication() {
+    void shouldQueryReferenceOnlyOnSubscriptionAndPreserveApplicationData() {
         CreditApplication application = application();
         when(applicationPort.findByReference("REF-001")).thenReturn(Mono.just(application));
 
@@ -37,7 +37,7 @@ class QueryApplicationsUseCaseTest {
 
         verifyNoInteractions(applicationPort);
         StepVerifier.create(result)
-                .expectNextMatches(value -> value == application)
+                .expectNext(application)
                 .verifyComplete();
         verify(applicationPort).findByReference("REF-001");
         verifyNoMoreInteractions(applicationPort);
