@@ -37,6 +37,9 @@ PostgreSQL initialization is managed by the existing Compose scripts.
 
 ## Credit application API
 
+Frontend integration contract: [API_FRONTEND.md](API_FRONTEND.md), with endpoint
+examples, response schemas, business statuses, retry behavior and error handling.
+
 | Method | Route | Behavior |
 |---|---|---|
 | POST | `/applications` | Process a new application or return its original result. |
@@ -85,5 +88,57 @@ Swagger UI, its configuration and the generated OpenAPI document were verified
 through HTTP on a temporary backend instance. No credit requests were created
 during that verification.
 
-The new processing and HTTP flow has been implemented; runtime verification is
-pending. No automated tests were run for this implementation stage.
+## Unit tests
+
+Run the domain, application, R2DBC mapper, adapter and exception unit tests with:
+
+```powershell
+.\gradlew.bat test --tests "com.backend_IAS.demo.domain.*" --tests "com.backend_IAS.demo.application.*" --tests "com.backend_IAS.demo.infrastructure.r2dbc.mapper.*" --tests "com.backend_IAS.demo.infrastructure.r2dbc.adapter.*" --tests "com.backend_IAS.demo.exception.*"
+```
+
+Mapper tests cover DTO/domain conversions, exact decimal values, optional customer
+links, historical rejection descriptions, processing timestamps, retry messages
+and persistence error translation. Adapter tests cover deferred repository calls,
+empty results, database-generated responses, limit forwarding and error handling.
+Transaction adapter tests use the real `TransactionalOperator` with a mocked
+transaction manager to verify commit-before-result, rollback, commit failures,
+deferred operation creation and cancellation. These unit tests do not require a
+database or a Spring application context. Exception tests verify literal identifier
+formatting, validation details, stable messages and preservation of original and
+nested causes. The latest run passed 113 tests, including 47 mapper tests,
+34 adapter tests and 16 exception tests.
+The HTML report is available at `build/reports/tests/test/index.html`.
+
+## Automated flow and integration tests
+
+With Docker running, execute the complete suite:
+
+```powershell
+.\gradlew.bat test
+```
+
+To run only the HTTP processing scenarios:
+
+```powershell
+.\gradlew.bat test --tests "com.backend_IAS.demo.integration.ApplicationFlowsIntegrationTest"
+```
+
+`ApplicationFlowsIntegrationTest` starts the backend on a random port and uses a
+dedicated PostgreSQL 17 Testcontainers database. HTTP requests go through the real
+router, handler, use cases, rules, repositories and transaction manager. The
+backend connects with a restricted test application user; a separate admin
+connection resets the fixture before each scenario and injects controlled failures.
+
+The 47 flow tests verify approvals, accumulated credit usage, exact credit-limit
+boundaries, stored rejection reasons and precedence, decimal precision, numeric
+idempotency, historical retries after customer changes, conflicting references,
+request validation, query results and ordering, correlated error responses,
+unsupported content types, insertion failures and deferred commit failures.
+Concurrent HTTP scenarios verify credit-limit protection and duplicate-reference
+recovery after rollback, including unknown customers and cross-customer conflicts.
+In duplicate-reference scenarios, a spy synchronizes the initial reads to make the
+race deterministic; database operations remain real.
+
+The complete suite passed 174 tests: 113 unit tests, 47 HTTP flow tests, 13 existing
+persistence integration tests and one Spring context test. No tests failed or were
+skipped. The integration fixtures run in isolated containers.

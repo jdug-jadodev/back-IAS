@@ -36,9 +36,10 @@ CREATE TABLE credit_applications (
             ))
     ),
     CONSTRAINT ck_credit_applications_customer CHECK (
-        (customer_id IS NULL AND status = 'REJECTED' AND reason_code = 'CUSTOMER_NOT_FOUND')
-        OR (customer_id IS NOT NULL AND customer_id = requested_customer_id
-            AND (reason_code IS NULL OR reason_code <> 'CUSTOMER_NOT_FOUND'))
+        customer_id IS NULL OR customer_id = requested_customer_id
+    ),
+    CONSTRAINT ck_credit_applications_customer_not_found CHECK (
+        reason_code IS DISTINCT FROM 'CUSTOMER_NOT_FOUND' OR customer_id IS NULL
     )
 );
 
